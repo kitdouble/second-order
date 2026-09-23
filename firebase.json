@@ -1,0 +1,24 @@
+{
+  "hosting": {
+    "public": "hosting/public",
+    "rewrites": [
+      {
+        "source": "/api/ingest/**",
+        "run": { "serviceId": "so-ingest", "region": "australia-southeast1" }
+      },
+      {
+        "source": "**",
+        "run": { "serviceId": "so-web", "region": "australia-southeast1" }
+      }
+    ],
+    "headers": [
+      {
+        "source": "/run/**",
+        "headers": [
+          { "key": "X-Robots-Tag", "value": "noindex" },
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,107 @@
+# Push to main -> tests -> build -> deploy. Run by a Cloud Build trigger
+# (see SETUP.md). Nothing here needs to be run by hand.
+#
+# Order matters: both Cloud Run services must exist before Firebase Hosting
+# deploys, because Hosting's rewrites point at them.
+
+substitutions:
+  _REGION: australia-southeast1
+  _REPO: second-order
+  _WEB_SERVICE: so-web
+  _INGEST_SERVICE: so-ingest
+  _FIREBASE_TOOLS: 15.30.2
+
+options:
+  # Required when the trigger runs as a user-chosen service account.
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 1800s
+
+steps:
+  # 1. Tests. A failure stops the deploy and nothing changes in production.
+  - id: test-ingest
+    name: node:22
+    dir: services/ingest
+    entrypoint: bash
+    args: ["-c", "npm ci && npm test"]
+
+  # 2. Make sure the image registry exists (only does anything on the first run).
+  - id: ensure-registry
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud artifacts repositories describe ${_REPO} --location=${_REGION} >/dev/null 2>&1 \
+          || gcloud artifacts repositories create ${_REPO} --repository-format=docker \
+               --location=${_REGION} --description="Second Order images"
+    waitFor: ["-"]
+
+  # 3. Build and push both images in parallel.
+  - id: build-web
+    name: gcr.io/cloud-builders/docker
+    args: ["build", "-t", "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$COMMIT_SHA", "apps/web"]
+    waitFor: ["-"]
+  - id: build-ingest
+    name: gcr.io/cloud-builders/docker
+    args: ["build", "-t", "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/ingest:$COMMIT_SHA", "services/ingest"]
+    waitFor: ["-"]
+  - id: push-web
+    name: gcr.io/cloud-builders/docker
+    args: ["push", "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$COMMIT_SHA"]
+    waitFor: ["build-web", "ensure-registry", "test-ingest"]
+  - id: push-ingest
+    name: gcr.io/cloud-builders/docker
+    args: ["push", "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/ingest:$COMMIT_SHA"]
+    waitFor: ["build-ingest", "ensure-registry", "test-ingest"]
+
+  # 4. Deploy the ingest service. The database secret is attached only once
+  #    it exists, so the very first deploy works before the database is set up.
+  - id: deploy-ingest
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SECRET_FLAG=""
+        if gcloud secrets describe DATABASE_URL >/dev/null 2>&1; then
+          SECRET_FLAG="--set-secrets=DATABASE_URL=DATABASE_URL:latest"
+        fi
+        gcloud run deploy ${_INGEST_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/ingest:$COMMIT_SHA \
+          --region=${_REGION} \
+          --allow-unauthenticated \
+          --min-instances=0 --max-instances=5 \
+          --memory=512Mi --cpu=1 \
+          --set-env-vars=GIT_COMMIT=$SHORT_SHA \
+          $$SECRET_FLAG
+    waitFor: ["push-ingest"]
+
+  # 5. Deploy the researcher app (UI, API, MCP endpoint).
+  - id: deploy-web
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud run deploy ${_WEB_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$COMMIT_SHA \
+          --region=${_REGION} \
+          --allow-unauthenticated \
+          --min-instances=0 --max-instances=3 \
+          --memory=512Mi --cpu=1 \
+          --set-env-vars=GIT_COMMIT=$SHORT_SHA,DEPLOYED_AT=$$(date -u +%Y-%m-%dT%H:%MZ)
+    waitFor: ["push-web"]
+
+  # 6. Deploy Firebase Hosting: study bundles plus the routes to both services.
+  - id: deploy-hosting
+    name: node:22
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        npx --yes firebase-tools@${_FIREBASE_TOOLS} deploy --only hosting \
+          --project=$PROJECT_ID --non-interactive --message="$SHORT_SHA"
+    waitFor: ["deploy-web", "deploy-ingest"]
