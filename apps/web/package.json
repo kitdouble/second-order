@@ -5,16 +5,13 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "node .next/standalone/server.js"
+    "start": "node .next/standalone/apps/web/server.js"
   },
   "dependencies": {
+    "@so/core": "*",
     "next": "16.3.6",
+    "pg": "8.23.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
-  },
-  "devDependencies": {
-    "@types/node": "^22",
-    "@types/react": "^19",
-    "typescript": "^5"
   }
 }

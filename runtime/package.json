@@ -1,0 +1,22 @@
+{
+  "name": "@so/runtime",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Participant runtime. Built into hosting/public/runtime/<version>/ and committed, so old studies keep the exact code they ran with.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@jspsych/plugin-canvas-keyboard-response": "2.2.0",
+    "@jspsych/plugin-html-button-response": "2.1.0",
+    "@jspsych/plugin-html-keyboard-response": "2.2.0",
+    "@jspsych/plugin-instructions": "2.1.0",
+    "@jspsych/plugin-survey-likert": "2.2.0",
+    "@so/core": "*",
+    "jspsych": "8.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

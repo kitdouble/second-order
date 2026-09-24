@@ -1,0 +1,19 @@
+/* Second Order participant runtime */
+html, body { background: #fff; color: #111; }
+body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+#so-root { min-height: 100vh; }
+.so-text { max-width: 680px; margin: 0 auto; padding: 24px 16px; text-align: left; font-size: 18px; line-height: 1.55; }
+.so-text h2 { font-size: 24px; margin-top: 0; }
+.so-message { padding-top: 20vh; text-align: center; }
+.so-fix { font-size: 48px; font-weight: 300; }
+.so-keys { color: #666; font-size: 15px; margin-top: 12px; }
+.so-scale { display: flex; justify-content: space-between; max-width: 460px; margin: 10px auto 0; color: #555; font-size: 15px; }
+.so-fb { font-size: 32px; font-weight: 600; }
+.so-ok { color: #177245; }
+.so-no { color: #b42318; }
+.so-preview { position: fixed; top: 0; left: 0; right: 0; background: #fef3c7; color: #78350f; font-size: 13px; text-align: center; padding: 6px 8px; z-index: 1000; }
+.jspsych-btn { font-size: 17px; padding: 10px 18px; margin: 6px; }
+@media (max-width: 700px) {
+  .so-text { font-size: 16px; }
+  canvas { max-width: 100%; height: auto; }
+}

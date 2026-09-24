@@ -101,8 +101,8 @@ The site works without this; trial data just can't be saved until it's done.
    Role: **Secret Manager Secret Accessor**. **Save**.
 5. Cloud Build → Triggers → **Run** on `deploy-main` again.
 
-Check: `https://<your-project-id>.web.app/api/ingest/health` should show
-`"db": "ok"`, and the demo page at `/run/demo/` should say `"accepted": 1`.
+Check: `https://<your-project-id>.web.app/api/ingest/health` and
+`https://<your-project-id>.web.app/api/health` should both show `"db": "ok"`.
 
 ## 8. Point 2ndorder.live at it
 
@@ -113,6 +113,42 @@ Check: `https://<your-project-id>.web.app/api/ingest/health` should show
    24 hours. Firebase shows the status.
 4. Optional: add `www.2ndorder.live` too and set it to redirect to
    `2ndorder.live`.
+
+## 9. Create your account
+
+1. Make up a long random setup code (any 20+ characters; a password manager can
+   generate one).
+2. Secret Manager → **Create secret**. Name: `BOOTSTRAP_TOKEN`, value: the code.
+   Grant the same compute account **Secret Manager Secret Accessor** on it, as in
+   step 7.4. **Run** the trigger again.
+3. Open `https://2ndorder.live/setup` (or the web.app address), enter your name
+   and the setup code. You're signed in as lab head. This only works once.
+
+To add students and colleagues: **People** → add a name and tier → send them the
+one-time sign-in link it shows. For a new laptop or phone, make them a new link
+the same way (there are no passwords).
+
+## 10. Connect Claude
+
+1. In Claude: **Settings → Connectors → Add custom connector**, URL
+   `https://2ndorder.live/api/mcp`.
+2. Claude opens a Second Order page asking you to allow it. You must already be
+   signed in to Second Order in that browser.
+3. Try: "Using Second Order, read the guide, then draft a copy of the example
+   study with slug my-first-test."
+
+The **Connect Claude** page in the app has the same steps, plus the one-off
+setup for the **Lab Reviewer** project that runs the AI reviews.
+
+## 11. Connect Prolific (optional)
+
+Without this, everything works except the agent's Prolific actions (adding
+places, approving completed submissions, demographics) and automatic pausing on
+Prolific; the platform then tells you to do those by hand.
+
+1. Prolific → Settings → API tokens → create a token.
+2. Secret Manager → **Create secret** `PROLIFIC_TOKEN` with the token, grant the
+   compute account access as in step 7.4, and **Run** the trigger.
 
 ---
 
@@ -127,6 +163,8 @@ Check: `https://<your-project-id>.web.app/api/ingest/health` should show
 | Site shows "Page not found" from Firebase | Hosting deployed before Cloud Run existed | **Run** the trigger again |
 | `/api/ingest/health` shows `"db": "unreachable"` | Secret value or access | Re-check step 7 (secret name, value, and the permission on it) |
 | `"db": "not configured"` after step 7 | Deployed before the secret existed | **Run** the trigger again |
+| Claude's connector says the sign-in address is wrong, or links in the app show a run.app address | Firebase didn't pass the original host | Edit the trigger, add substitution variable `_PUBLIC_URL` = `https://2ndorder.live`, **Run** it |
+| Build fails at `test` with "runtime is out of date" | Participant runtime code changed without rebuilding | Ask Claude Code to run `npm run build:runtime` and commit the result |
 
 Every build's log is in **Cloud Build → History**. On GitHub, the tick or cross
 next to a commit links to it.

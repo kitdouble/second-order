@@ -1,0 +1,15 @@
+{
+  "name": "second-order",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "services/*",
+    "runtime"
+  ],
+  "scripts": {
+    "test": "npm test --workspaces --if-present",
+    "build:runtime": "npm run build --workspace runtime"
+  }
+}

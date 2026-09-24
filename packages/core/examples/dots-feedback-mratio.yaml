@@ -1,0 +1,114 @@
+spec: "0.1"
+study:
+  slug: dots-feedback-mratio
+  title: Accuracy feedback and metacognitive efficiency
+  approved_protocol: "Umbrella approval for anonymous online tasks (edit to your protocol number)"
+
+blocks:
+  consent: consent@1
+  instr: instructions@1
+  dots: dots-2afc-confidence@1
+  attn: attention-check@1
+  debrief: debrief@1
+
+design:
+  between:
+    feedback: [none, trialwise]
+  assignment: { method: deficit_weighted }
+
+sequence:
+  - use: consent
+    params:
+      text: |
+        You are invited to take part in a study about perceptual decisions.
+
+        The task takes about 18 minutes. Your responses are anonymous.
+        You can stop at any time by closing this window.
+
+  - use: instr
+    params:
+      pages:
+        - |
+          On each trial, two boxes of dots will flash briefly.
+
+          Press **F** if the **left** box had more dots, or **J** if the **right** box had more dots.
+        - |
+          After each choice, rate how confident you are, from 1 (**guessing**) to 6 (**certain**).
+
+  - use: dots
+    id: practice
+    params:
+      trials: 30
+      feedback: always
+      staircase: { rule: 2down1up, start_diff: 20, step: [4, 2, 1] }
+      record: false
+
+  - use: dots
+    id: main
+    params:
+      blocks: 4
+      trials_per_block: 50
+      feedback: { $cond: feedback, none: never, trialwise: always }
+      staircase: { continue_from: practice }
+
+  - use: attn
+    params:
+      item: "To show you are reading carefully, please select 'Strongly disagree'."
+      correct: Strongly disagree
+
+  - use: debrief
+    params:
+      text: |
+        Thank you for taking part. This study looks at whether feedback changes how well
+        people's confidence tracks their accuracy.
+
+measures:
+  accuracy: { fn: mean, of: main.correct }
+  mratio: { fn: mratio, from: main }
+  d_prime: { fn: d_prime, from: main }
+  conf_sd: { fn: sd, of: main.confidence }
+  fast_rt: { fn: prop, of: main.rt, where: "< 200" }
+
+exclusions:
+  - { id: at_chance, when: "accuracy < 0.60" }
+  - { id: flat_conf, when: "conf_sd == 0" }
+  - { id: fast, when: "fast_rt > 0.10" }
+  - { id: attn_fail, when: "attn.passed == false" }
+
+recruitment:
+  platform: prolific
+  max_n: 240
+  est_minutes: 18
+  reward_per_participant: 2.70
+  currency: GBP
+
+analysis:
+  primary:
+    hypothesis: M-ratio is higher with trialwise feedback than without feedback.
+    dv: mratio
+    test: bf_ttest_independent
+    factor: feedback
+    prior: { cauchy_r: 0.707, direction: "trialwise > none" }
+  stopping:
+    check_every: 10
+    min_n_per_group: 30
+    max_n_per_group: 100
+    stop_when: "bf10 >= 10 or bf10 <= 0.1"
+  secondary:
+    - Hierarchical meta-d' (HMeta-d) by condition, reported descriptively.
+
+pilot:
+  n_per_condition: 6
+  checks:
+    - { id: main_trials, expect: "count(main) == 200", level: blocker }
+    - { id: main_accuracy, expect: "mean(main.correct) between 0.64 and 0.78", level: blocker }
+    - { id: conf_use, expect: "median(main.confidence_levels_used) >= 3", level: warning }
+    - { id: exclusions, expect: "exclusion_rate <= 0.25", level: blocker }
+
+simulation:
+  n_per_group: [30, 60, 100]
+  reps: 100
+  truth:
+    threshold: { mean: 12, sd: 4 }
+    mratio: { mean: 0.8, sd: 0.25, by: { feedback: { none: 0.80, trialwise: 0.95 } } }
+    attention_pass: 0.95
