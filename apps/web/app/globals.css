@@ -1,12 +1,13 @@
 :root {
-  --bg: #fafaf9;
+  --bg: #faf8f5;
   --panel: #ffffff;
   --ink: #1c1917;
   --muted: #57534e;
   --faint: #a8a29e;
   --line: #e7e5e4;
-  --accent: #1d4ed8;
+  --accent: #B8610E;
   --accent-ink: #ffffff;
+  --secondary: #6B8E6E;
   --ok: #15803d;
   --ok-bg: #dcfce7;
   --warn: #a16207;
@@ -25,8 +26,9 @@
     --muted: #a8a29e;
     --faint: #78716c;
     --line: #292524;
-    --accent: #60a5fa;
-    --accent-ink: #0c0a09;
+    --accent: #D4824B;
+    --accent-ink: #ffffff;
+    --secondary: #8BA88E;
     --ok: #4ade80;
     --ok-bg: #052e16;
     --warn: #facc15;
@@ -51,7 +53,13 @@ h3 { font-size: 15px; margin: 18px 0 8px; }
 .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
 header.top { border-bottom: 1px solid var(--line); background: var(--panel); }
 header.top .wrap { display: flex; align-items: center; gap: 18px; height: 52px; overflow-x: auto; }
-header.top .brand { font-weight: 700; color: var(--ink); white-space: nowrap; }
+header.top .brand { font-weight: 700; color: var(--ink); white-space: nowrap; display: inline-block; }
+header.top .brand img { height: 36px; width: auto; display: none; }
+header.top .brand .logo-light { display: block; }
+@media (prefers-color-scheme: dark) {
+  header.top .brand .logo-light { display: none; }
+  header.top .brand .logo-dark { display: block; }
+}
 header.top nav { display: flex; gap: 14px; flex: 1; white-space: nowrap; }
 header.top nav a { color: var(--muted); }
 header.top .who { color: var(--muted); font-size: 13px; white-space: nowrap; }
