@@ -2,7 +2,6 @@ import "./globals.css";
 import Link from "next/link";
 import { currentUser } from "@/lib/auth";
 import { dbConfigured } from "@/lib/db";
-import SplashScreen from "@/components/splash-screen";
 
 export const metadata = {
   title: "Second Order",
@@ -22,7 +21,6 @@ export default async function RootLayout({ children }) {
         <link rel="icon" href="/assets/dark_without_text.png" media="(prefers-color-scheme: dark)" />
       </head>
       <body>
-        <SplashScreen />
         <header className="top">
           <div className="wrap">
             <Link href="/" className="brand">
