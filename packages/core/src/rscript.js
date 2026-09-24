@@ -30,6 +30,28 @@ function exprToR(src) {
   return go(ast);
 }
 
+// Row filter over a step's columns, as an R index on data frame `s`.
+function filterToR(src) {
+  const ast = parseExpr(src);
+  const go = (n) => {
+    switch (n.k) {
+      case "lit":
+        return n.v === true ? "TRUE" : n.v === false ? "FALSE" : n.v === null ? "NA" : typeof n.v === "string" ? JSON.stringify(n.v) : String(n.v);
+      case "id":
+        return `s[[${JSON.stringify(n.v)}]]`;
+      case "not":
+        return `!(${go(n.a)})`;
+      case "and":
+        return `(${go(n.a)} & ${go(n.b)})`;
+      case "or":
+        return `(${go(n.a)} | ${go(n.b)})`;
+      case "cmp":
+        return `(${go(n.a)} ${n.op} ${go(n.b)})`;
+    }
+  };
+  return go(ast);
+}
+
 function whereToR(where, v) {
   if (!where) return "TRUE";
   const m = /^\s*(==|!=|<=|>=|<|>)\s*(-?\d+(?:\.\d+)?)\s*$/.exec(where);
@@ -93,10 +115,13 @@ export function generateRScript(spec, { hash = "draft", generatedAt = new Date()
   }
 
   // Measures.
+  const filterLine = (m) => (m.filter ? [`  s <- s[which(${filterToR(m.filter)}), , drop = FALSE]  # ${m.filter}`] : []);
   for (const [name, m] of Object.entries(spec.measures)) {
     const key = rStr(name);
+    if (m.fn === "diff") continue;
     if (["d_prime", "meta_d", "mratio"].includes(m.fn)) {
       L.push(`  s <- step(${rStr(m.from)})`);
+      L.push(...filterLine(m));
       if (m.fn === "d_prime") {
         L.push(`  out[[${key}]] <- if (nrow(s)) type_one(s)$d_prime else NA`);
       } else {
@@ -107,6 +132,7 @@ export function generateRScript(spec, { hash = "draft", generatedAt = new Date()
     }
     const [id, col] = m.of.split(".");
     L.push(`  s <- step(${rStr(id)})`);
+    L.push(...filterLine(m));
     if (m.fn === "count") {
       L.push(`  out[[${key}]] <- ${col ? `sum(!is.na(s[[${rStr(col)}]]))` : "nrow(s)"}`);
     } else if (m.fn === "first") {
@@ -120,6 +146,10 @@ export function generateRScript(spec, { hash = "draft", generatedAt = new Date()
         L.push(`  out[[${key}]] <- if (length(v)) ${f} else NA`);
       }
     }
+  }
+  for (const [name, m] of Object.entries(spec.measures)) {
+    if (m.fn !== "diff") continue;
+    L.push(`  out[[${rStr(name)}]] <- as.numeric(out[[${rStr(m.a)}]]) - as.numeric(out[[${rStr(m.b)}]])  # ${m.a} minus ${m.b}`);
   }
   L.push(`  as.data.frame(out, check.names = FALSE, stringsAsFactors = FALSE)`);
   L.push(`}`);

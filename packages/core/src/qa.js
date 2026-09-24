@@ -2,7 +2,7 @@
 // and checks the data that comes out. Catches broken references, missing
 // columns, wrong trial counts and conditions that don't differ as intended.
 // (Screenshot-based checks of the real browser bundle run separately.)
-import { getBlock } from "./blocks/index.js";
+import { getBlock, blockColumns } from "./blocks/index.js";
 import { listConditions, resolveCond, findConds } from "./conditions.js";
 import { simulateSession, drawObserver } from "./simulate.js";
 import { scoreParticipant } from "./measures.js";
@@ -43,7 +43,10 @@ export function runQa(spec, { seed = "qa" } = {}) {
       if (got.length !== expected) {
         add("blocker", `${cond.key}: step "${step.id}" produced ${got.length} rows, expected ${expected}.`, step.id);
       }
-      for (const [col, type] of Object.entries(block.columns)) {
+      if (block.custom) {
+        add("warning", `${cond.key}: step "${step.id}" is custom code. QA used placeholder rows; only a preview and a pilot show what it really records.`, step.id);
+      }
+      for (const [col, type] of Object.entries(blockColumns(block, step.params))) {
         const bad = got.filter((r) => r[col] !== null && r[col] !== undefined && !TYPE_OK[type](r[col]));
         if (bad.length) add("blocker", `${cond.key}: column ${step.id}.${col} has ${bad.length} values that are not ${type}.`, step.id);
       }
@@ -83,14 +86,16 @@ export function runQa(spec, { seed = "qa" } = {}) {
 
   // Pilot checks against the synthetic sessions (should pass for a sane design).
   if (spec.pilot?.checks?.length) {
+    // Eight synthetic people per condition: enough that rates aren't noise.
     const sessions = report.length
-      ? conditions.map((cond) => {
-          const obs = drawObserver(spec.simulation?.truth, cond.levels, makeRng(`${seed}:pc:${cond.key}`));
-          const { rows } = simulateSession(spec, cond.levels, `${seed}:pc:${cond.key}`, obs);
-          const p = { levels: cond.levels, rows };
-          const s = scoreParticipant(spec, p);
-          return { rows, ...s, minutes: estimateMinutes(spec) };
-        })
+      ? conditions.flatMap((cond) =>
+          Array.from({ length: 8 }, (_, k) => {
+            const obs = drawObserver(spec.simulation?.truth, cond.levels, makeRng(`${seed}:pc:${cond.key}:${k}`));
+            const { rows } = simulateSession(spec, cond.levels, `${seed}:pc:${cond.key}:${k}`, obs);
+            const s = scoreParticipant(spec, { levels: cond.levels, rows });
+            return { rows, ...s, minutes: estimateMinutes(spec) };
+          }),
+        )
       : [];
     for (const r of runChecks(spec.pilot.checks, sessions)) {
       if (!r.pass) add("warning", `Pilot check "${r.id}" fails even on synthetic data (observed ${JSON.stringify(r.observed)}). The threshold may be wrong.`, `pilot.checks`);

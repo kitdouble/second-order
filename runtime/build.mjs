@@ -14,6 +14,18 @@ const version = `v${pkg.version.split(".")[0]}`;
 const out = process.env.OUT_DIR ?? path.join(here, "..", "hosting", "public", "runtime", version);
 mkdirSync(out, { recursive: true });
 
+// The sandbox bundle runs custom-jspsych code inside an isolated frame.
+await build({
+  entryPoints: [path.join(here, "src", "sandbox.js")],
+  bundle: true,
+  format: "iife",
+  target: ["es2020"],
+  minify: true,
+  legalComments: "none",
+  outfile: path.join(out, "sandbox.js"),
+  logLevel: "warning",
+});
+
 await build({
   entryPoints: [path.join(here, "src", "main.js")],
   alias: { "@so/core": path.join(here, "..", "packages", "core", "src", "runtime.js") },

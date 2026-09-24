@@ -1,0 +1,122 @@
+spec: "0.1"
+study:
+  slug: flanker-feedback
+  title: Error feedback and the flanker effect
+  approved_protocol: "Umbrella approval for anonymous online tasks (edit to your protocol number)"
+
+blocks:
+  consent: consent@1
+  instr: instructions@1
+  flanker: choice-rt@1
+  attn: attention-check@1
+  debrief: debrief@1
+
+design:
+  between:
+    feedback: [none, errors]
+
+sequence:
+  - use: consent
+    params:
+      text: |
+        You are invited to take part in a short study about attention.
+
+        It takes about 8 minutes. Your responses are anonymous, and you can stop at any time.
+
+  - use: instr
+    params:
+      pages:
+        - |
+          You will see a row of five arrows. Respond to the **middle** arrow only.
+
+          Press **F** if it points **left**, and **J** if it points **right**. Be fast and accurate.
+
+  - use: flanker
+    id: practice
+    params:
+      trials: 12
+      feedback: always
+      record: false
+      stimuli: &arrows
+        - { id: con_left, text: "<<<<<", type: congruent, correct: left }
+        - { id: con_right, text: ">>>>>", type: congruent, correct: right }
+        - { id: inc_left, text: ">><>>", type: incongruent, correct: left }
+        - { id: inc_right, text: "<<><<", type: incongruent, correct: right }
+      responses: &keys
+        - { name: left, key: f, label: "F = left" }
+        - { name: right, key: j, label: "J = right" }
+      font: mono
+
+  - use: flanker
+    id: main
+    params:
+      blocks: 2
+      trials_per_block: 64
+      feedback: { $cond: feedback, none: never, errors: errors }
+      stimuli: *arrows
+      responses: *keys
+      font: mono
+
+  - use: attn
+    params:
+      item: "To show you are reading carefully, please select 'Strongly disagree'."
+      correct: Strongly disagree
+
+  - use: debrief
+    params:
+      text: |
+        Thank you. This study tests whether feedback on errors changes how much the surrounding
+        arrows slow people down (the flanker effect).
+
+measures:
+  accuracy: { fn: mean, of: main.correct }
+  rt_incongruent: { fn: mean, of: main.rt, filter: "type == 'incongruent' and correct == true" }
+  rt_congruent: { fn: mean, of: main.rt, filter: "type == 'congruent' and correct == true" }
+  flanker_rt: { fn: diff, a: rt_incongruent, b: rt_congruent }
+  acc_incongruent: { fn: mean, of: main.correct, filter: "type == 'incongruent'" }
+  acc_congruent: { fn: mean, of: main.correct, filter: "type == 'congruent'" }
+  flanker_acc: { fn: diff, a: acc_congruent, b: acc_incongruent }
+  timeouts: { fn: mean, of: main.timeout }
+
+exclusions:
+  - { id: low_accuracy, when: "accuracy < 0.70" }
+  - { id: many_timeouts, when: "timeouts > 0.10" }
+  - { id: attn_fail, when: "attn.passed == false" }
+
+recruitment:
+  platform: prolific
+  max_n: 200
+  est_minutes: 7
+  reward_per_participant: 1.10
+  currency: GBP
+
+analysis:
+  primary:
+    hypothesis: The flanker RT effect is smaller with error feedback than without feedback.
+    dv: flanker_rt
+    test: bf_ttest_independent
+    factor: feedback
+    prior: { cauchy_r: 0.707, direction: "none > errors" }
+  stopping:
+    check_every: 10
+    min_n_per_group: 25
+    max_n_per_group: 90
+    stop_when: "bf10 >= 10 or bf10 <= 0.1"
+
+pilot:
+  n_per_condition: 5
+  checks:
+    - { id: main_trials, expect: "count(main) == 128", level: blocker }
+    - { id: main_accuracy, expect: "mean(main.correct) between 0.8 and 0.99", level: warning }
+    - { id: flanker_present, expect: "mean(flanker_rt) >= 15", level: warning, why: "A flanker effect should appear; none suggests the stimuli or scoring are wrong." }
+    - { id: exclusions, expect: "exclusion_rate <= 0.2", level: blocker }
+
+simulation:
+  n_per_group: [30, 60, 90]
+  reps: 60
+  truth:
+    choice:
+      rt: { mean: 520, sd: 70 }
+      accuracy: { mean: 0.94, sd: 0.03 }
+      effects: { incongruent: { rt: 55, accuracy: -0.05 } }
+      by: { feedback: { errors: { effects: { incongruent: { rt: 40, accuracy: -0.03 } } } } }

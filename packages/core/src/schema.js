@@ -16,10 +16,13 @@ const blockRef = z
   .regex(/^[a-z0-9-]+@\d+$/, 'Block references look like "dots-2afc-confidence@1".');
 
 const measure = z.strictObject({
-  fn: z.enum(["mean", "sd", "prop", "count", "first", "median", "d_prime", "meta_d", "mratio"]),
+  fn: z.enum(["mean", "sd", "prop", "count", "first", "median", "d_prime", "meta_d", "mratio", "diff"]),
   of: z.string().optional(), // "<seqId>.<column>"
   from: z.string().optional(), // "<seqId>" for SDT measures
-  where: z.string().optional(), // e.g. "< 200"
+  where: z.string().optional(), // e.g. "< 200", applied to the measured column
+  filter: z.string().optional(), // row filter over the step's columns, e.g. "type == 'incongruent' and correct == true"
+  a: z.string().optional(), // diff: measure a minus measure b
+  b: z.string().optional(),
   bins: z.number().int().min(2).max(10).optional(),
 });
 

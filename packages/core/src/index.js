@@ -20,4 +20,4 @@ export { trialsCsv, participantsCsv, toCsv } from "./export.js";
 export { hashSpec, canonicalJson, shortHash } from "./hash.js";
 export { estimateMinutes } from "./estimate.js";
 export { textToHtml, textToPlain, escapeHtml } from "./text.js";
-export { EXAMPLE_DOTS_YAML } from "./examples.js";
+export { EXAMPLE_DOTS_YAML, EXAMPLE_FLANKER_YAML, EXAMPLE_CUSTOM_YAML, EXAMPLES } from "./examples.js";

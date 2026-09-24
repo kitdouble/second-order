@@ -4,11 +4,12 @@
 //   attn.passed == false
 //   bf10 >= 10 or bf10 <= 0.1
 //   not (conf_sd > 0) and fast_rt <= 0.1
+//   type == 'incongruent' and correct == true      (row filters)
 //
 // Identifiers may contain dots. No function calls, no assignment, nothing that
 // can reach outside the values passed in. Unknown identifiers are an error.
 
-const TOKEN = /\s*(?:(\d+(?:\.\d+)?(?:e[+-]?\d+)?)|([A-Za-z_][A-Za-z0-9_.]*)|(==|!=|<=|>=|<|>|\(|\)|&&|\|\||-)|(\S))/y;
+const TOKEN = /\s*(?:(\d+(?:\.\d+)?(?:e[+-]?\d+)?)|([A-Za-z_][A-Za-z0-9_.]*)|'([^'\\]{0,200})'|"([^"\\]{0,200})"|(==|!=|<=|>=|<|>|\(|\)|&&|\|\||-)|(\S))/y;
 
 function tokenize(src) {
   const out = [];
@@ -24,10 +25,12 @@ function tokenize(src) {
       else if (w === "true" || w === "false") out.push({ t: "bool", v: w === "true" });
       else if (w === "null") out.push({ t: "null" });
       else out.push({ t: "id", v: w });
-    } else if (m[3] !== undefined) out.push({ t: "op", v: m[3] });
-    else if (m[4] !== undefined) {
-      if (m[4].trim() === "") continue;
-      throw new ExprError(`Unexpected character "${m[4]}".`);
+    } else if (m[3] !== undefined) out.push({ t: "str", v: m[3] });
+    else if (m[4] !== undefined) out.push({ t: "str", v: m[4] });
+    else if (m[5] !== undefined) out.push({ t: "op", v: m[5] });
+    else if (m[6] !== undefined) {
+      if (m[6].trim() === "") continue;
+      throw new ExprError(`Unexpected character "${m[6]}".`);
     }
   }
   return out;
@@ -81,6 +84,7 @@ export function parseExpr(src) {
     if (!tk) throw new ExprError("Expression ends too early.");
     if (tk.t === "num") return { k: "lit", v: tk.v };
     if (tk.t === "bool") return { k: "lit", v: tk.v };
+    if (tk.t === "str") return { k: "lit", v: tk.v };
     if (tk.t === "null") return { k: "lit", v: null };
     if (tk.t === "id") return { k: "id", v: tk.v };
     if (tk.t === "op" && tk.v === "(") {

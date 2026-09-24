@@ -32,6 +32,28 @@ export function drawObserver(truth, levels, rng) {
     rtMedian: Math.exp(rng.normal(Math.log(700), 0.2)),
     attentionPass: t.attention_pass ?? 0.95,
     trait: rng.normal(0, 1),
+    choice: drawChoice(t.choice, levels, rng),
+  };
+}
+
+/**
+ * Choice-task observer. truth.choice: { rt: {mean, sd}, rt_sigma, accuracy: {mean, sd},
+ * effects: { <trial type>: {rt, accuracy} }, by: { <factor>: { <level>: { effects } } } }.
+ */
+function drawChoice(c = {}, levels, rng) {
+  let effects = { ...(c.effects ?? {}) };
+  for (const [factor, byLevel] of Object.entries(c.by ?? {})) {
+    const lv = levels[factor];
+    if (lv !== undefined && byLevel[lv]?.effects) effects = { ...effects, ...byLevel[lv].effects };
+  }
+  const acc = c.accuracy ?? { mean: 0.93, sd: 0.04 };
+  return {
+    rt: Math.max(200, rng.normal(c.rt?.mean ?? 520, c.rt?.sd ?? 70)),
+    rtSigma: c.rt_sigma ?? 0.22,
+    accuracy: Math.min(0.995, Math.max(0.5, rng.normal(acc.mean ?? 0.93, acc.sd ?? 0.04))),
+    effects: Object.fromEntries(
+      Object.entries(effects).map(([k, e]) => [k, { rt: rng.normal(e.rt ?? 0, e.rt_sd ?? Math.abs(e.rt ?? 0) * 0.4), accuracy: e.accuracy ?? 0 }]),
+    ),
   };
 }
 
@@ -137,7 +159,8 @@ export function runSimulation(spec, { reps, nPerGroup, seed = "sim", budgetMs = 
         p.scored = scoreParticipant(spec, p);
         p.obs = obs;
         people.push(p);
-        if (r === 0 && spec.analysis.primary?.dv && typeof p.scored.measures[spec.analysis.primary.dv] === "number") {
+        const dvFn = spec.measures?.[spec.analysis.primary?.dv]?.fn;
+        if (r === 0 && ["mratio", "meta_d"].includes(dvFn) && typeof p.scored.measures[spec.analysis.primary.dv] === "number") {
           recovery.push({ truth: obs.mratio, est: p.scored.measures[spec.analysis.primary.dv], level: lvl });
         }
       }
@@ -226,8 +249,10 @@ export function runSimulation(spec, { reps, nPerGroup, seed = "sim", budgetMs = 
           ),
         }
       : null,
-    note:
-      "Synthetic participants are SDT observers with known meta-d'/d' (Maniscalco & Lau). Treat power as a planning aid, " +
-      "and replace nuisance parameters (threshold, exclusion rate) with pilot values once available.",
+    note: spec.sequence.some((it) => getBlock(spec.blocks[it.use])?.custom)
+      ? "This study includes custom code, which the simulator can't model: its rows are random placeholders, so these power figures " +
+        "don't apply to measures from the custom step. Use pilot data to plan the sample size instead."
+      : "Synthetic participants are explicit generative models (SDT observers for the dots task; log-normal RTs with per-type effects " +
+        "for choice tasks). Treat power as a planning aid, and replace nuisance parameters with pilot values once available.",
   };
 }

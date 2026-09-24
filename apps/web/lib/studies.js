@@ -337,6 +337,9 @@ export async function requestReview(actor, slug, summary = null) {
 /** Who may approve this gate for this study? */
 export async function approvalRight(actor, s, spec, gate) {
   if (isLabHead(actor)) return { ok: true };
+  if (spec.sequence.some((it) => getBlock(spec.blocks[it.use])?.custom)) {
+    return { ok: false, reason: "This study runs custom code, so the lab head approves it whatever the tier." };
+  }
   if (s.owner_id !== actor.user.id) return { ok: false, reason: "Only the lab head can approve other people's studies." };
   if (actor.user.tier !== "trusted") return { ok: false, reason: "Supervised studies need the lab head's approval." };
   const spend = estimatedSpend(spec, gate === "pilot" ? pilotN(spec) : spec.recruitment.max_n);

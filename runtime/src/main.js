@@ -36,7 +36,7 @@ async function main() {
   const preview = start.phase === "preview";
   const plan = start.plan;
   if (preview && qs.get("quick")) {
-    for (const s of plan.steps) if (s.params.staircase) s.items = s.items.slice(0, 6);
+    for (const s of plan.steps) if (s.params.staircase || s.block.startsWith("choice-rt")) s.items = s.items.slice(0, 6);
   }
 
   const timing = createTimingMonitor();
@@ -82,6 +82,9 @@ async function main() {
 
   const ctx = {
     seed: start.seed,
+    levels: plan.levels,
+    preview,
+    finish: () => jsPsych.finishTrial(),
     stairs: {},
     timing,
     record(step, index, data) {

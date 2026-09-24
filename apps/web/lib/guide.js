@@ -25,7 +25,7 @@ draft -> in_review -> approved -> piloting -> pilot_review -> live -> (paused) -
 
 ## Writing a spec
 1. get kind "block_catalog": the blocks, their params (JSON Schema), output columns and summary values.
-2. get kind "example_spec": a complete worked example to adapt.
+2. get kind "example_spec" with name dots | flanker | custom: complete worked examples to adapt.
 3. edit_spec action "save" with the full YAML. Read errors (each has a path) and fix them.
 4. check kind "qa". Blockers must be fixed. Then check kind "simulate" (power, expected N, parameter recovery).
 5. check kind "preview" gives links to click through each condition. Tell the person to open them.
@@ -34,9 +34,11 @@ draft -> in_review -> approved -> piloting -> pilot_review -> live -> (paused) -
 ## Spec essentials
 - blocks: alias -> "block-ref@version". sequence: steps using an alias, with params and optional id.
 - Between-subjects factors in design.between. Per-condition params use {$cond: factor, level_a: x, level_b: y}.
-  $cond is the only logic allowed. Anything more complex needs a new block (ask a person).
+  $cond is the only logic allowed outside custom code.
 - measures: fn mean|sd|median|prop|count|first (of: "<step>.<column>", optional where: "< 200"),
-  or d_prime|meta_d|mratio (from: "<step>"; needs confidence).
+  or d_prime|meta_d|mratio (from: "<step>"; needs confidence), or diff (a: measure, b: measure; a minus b).
+  Any non-diff measure can take filter: an expression over the step's columns that picks rows, e.g.
+  filter: "type == 'incongruent' and correct == true". Strings go in single quotes.
 - exclusions: [{id, when}] with expressions over measure names and block values like attn.passed.
   Operators: == != < <= > >= and or not. A missing value counts as excluded.
 - analysis.primary: bf_ttest_independent on a measure, factor with 2 levels, prior {cauchy_r, direction: "a > b"}.
@@ -45,6 +47,30 @@ draft -> in_review -> approved -> piloting -> pilot_review -> live -> (paused) -
   "median(main.confidence_levels_used) >= 3", "exclusion_rate <= 0.25". Levels: blocker | warning.
   Propose checks with a one-line why for each threshold; the person edits them.
 - simulation.truth: threshold {mean, sd} (dots difference giving d' = 1), mratio {mean, sd, by: {factor: {level: value}}}.
+
+## Tasks that aren't a ready-made block
+Check the catalog first. Then, in this order:
+1. choice-rt@1 covers most speeded choice tasks: flanker, Stroop, Simon, lexical decision, categorisation, go/no-go
+   with 2+ keys, anything that is "show a text/symbol stimulus, press one of 2 to 6 keys". Stimuli are a list of
+   {id, text, color, position, type, correct, weight}; type is your label for filtering (congruent, incongruent, word...).
+   Optional confidence and feedback. Use this whenever it fits: it gets simulation, QA and power analysis.
+   See example_spec name "flanker".
+2. custom-jspsych@1 for anything else (images, audio, canvas drawings, no-response trials, sequences, surveys with
+   branching). You write jsPsych 8 code in params.code; it runs in a sandbox with no network access. Contract:
+   - The code is a function body receiving \`api\`: api.root (element to render into; pass it as display_element),
+     api.params (params.params), api.condition (e.g. {feedback: "none"}), api.rng() (seeded random, use it instead of
+     Math.random), api.record(row) (once per trial) and api.done() (once, at the end, e.g. in on_finish).
+   - Globals: initJsPsych and jsPsych{HtmlKeyboardResponse, HtmlButtonResponse, CanvasKeyboardResponse,
+     CanvasButtonResponse, ImageKeyboardResponse, ImageButtonResponse, AudioKeyboardResponse, HtmlSliderResponse,
+     SurveyLikert, SurveyMultiChoice, SurveyText, Instructions, CallFunction, Preload}. No other libraries, no fetch.
+   - Declare every recorded column in params.columns with a type (integer, number, string, boolean); undeclared
+     keys are dropped. Set expected_rows to the number of api.record calls (a pilot check enforces it) and est_minutes.
+   - Validation checks it compiles and calls api.record and api.done. It can't check behaviour: QA and simulation
+     use placeholder rows, so there is no power analysis. Tell the person to click through the preview themselves.
+   - Any study with custom code needs the lab head's approval, whatever the person's tier. Say so up front.
+   See example_spec name "custom".
+If a custom task will be reused across studies, suggest the lab turns it into a proper block (CLAUDE.md in the repo
+explains how); don't copy custom code between studies silently.
 
 ## Reviewing (if you are the Lab Reviewer)
 review action "next_task" returns a task with instructions, spec, QA and simulation. Follow the task's
@@ -65,4 +91,3 @@ Suggest analyses freely before data (they become part of the plan); after data, 
 `;
 }
 
-export { EXAMPLE_DOTS_YAML as exampleSpecYaml } from "@so/core";

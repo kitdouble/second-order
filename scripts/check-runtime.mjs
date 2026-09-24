@@ -8,7 +8,7 @@ import path from "node:path";
 const tmp = mkdtempSync(path.join(tmpdir(), "rt-"));
 execFileSync("node", ["runtime/build.mjs"], { env: { ...process.env, OUT_DIR: tmp }, stdio: "inherit" });
 const version = `v${JSON.parse(readFileSync("runtime/package.json", "utf8")).version.split(".")[0]}`;
-for (const f of ["runtime.js", "runtime.css"]) {
+for (const f of ["runtime.js", "runtime.css", "sandbox.js"]) {
   const a = readFileSync(path.join(tmp, f));
   const b = readFileSync(path.join("hosting/public/runtime", version, f));
   if (!a.equals(b)) {

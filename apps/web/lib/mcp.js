@@ -3,7 +3,8 @@
 // Approve, deploy, resume and close do not exist here at all.
 import * as S from "./studies.js";
 import * as P from "./prolific-tools.js";
-import { SERVER_INSTRUCTIONS, guideText, exampleSpecYaml } from "./guide.js";
+import { SERVER_INSTRUCTIONS, guideText } from "./guide.js";
+import { EXAMPLES } from "@so/core";
 
 const PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "0.1.0";
@@ -24,7 +25,7 @@ export const TOOLS = [
     name: "get",
     title: "Get an object",
     description:
-      "Read one thing by kind. Kinds: guide (read first), block_catalog, example_spec, lab_standards, studies (list), " +
+      "Read one thing by kind. Kinds: guide (read first), block_catalog, example_spec (name: dots | flanker | custom), lab_standards, studies (list), " +
       'study (summary with versions and comments), spec (YAML at a hash; default current), review_queue, person (meeting prep; name optional), saved (analyses and notes). ' +
       'Examples: {"kind": "guide"}; {"kind": "spec", "study": "dots-feedback-mratio"}; {"kind": "person", "name": "Alex"}.',
     inputSchema: {
@@ -35,7 +36,7 @@ export const TOOLS = [
         }),
         study: str("Study slug, for study/spec/saved."),
         hash: str("Version hash (or its first 12 characters), for spec."),
-        name: str("Person's name, for person."),
+        name: str("Person's name, for person; example name for example_spec (dots, flanker, custom)."),
       },
       required: ["kind"],
     },
@@ -252,8 +253,11 @@ async function call(name, a, actor, base) {
           return { guide: guideText() };
         case "block_catalog":
           return { blocks: S.catalog() };
-        case "example_spec":
-          return { yaml: exampleSpecYaml };
+        case "example_spec": {
+          const ex = EXAMPLES[a.name ?? "dots"];
+          if (!ex) throw new S.ServiceError(`No example "${a.name}". Examples: ${Object.keys(EXAMPLES).join(", ")}.`);
+          return { name: a.name ?? "dots", shows: ex.shows, yaml: ex.yaml, other_examples: Object.fromEntries(Object.entries(EXAMPLES).map(([k, v]) => [k, v.shows])) };
+        }
         case "lab_standards":
           return { lab_standards: (await S.getLabStandards()) || "(none written yet)" };
         case "studies":

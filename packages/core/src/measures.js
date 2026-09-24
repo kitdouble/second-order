@@ -1,6 +1,6 @@
 // Per-participant measures and exclusions, computed from trial rows exactly as
 // the spec declares them. The generated R script mirrors this file.
-import { getBlock } from "./blocks/index.js";
+import { getBlock, blockColumns } from "./blocks/index.js";
 import { stepId } from "./compile.js";
 import { resolveCond } from "./conditions.js";
 import { evalExpr } from "./expr.js";
@@ -33,9 +33,35 @@ function stepParams(spec, id, levels) {
  * Computes one measure for one participant.
  * participant: { levels, rows: { [stepId]: [row, ...] } }
  */
+/** Applies a measure's row filter (an expression over the step's columns). */
+function filterRows(spec, stepIdName, rows, filter, levels = {}) {
+  if (!filter) return rows;
+  const item = spec.sequence.find((s) => stepId(s) === stepIdName);
+  let cols = [];
+  if (item) {
+    const block = getBlock(spec.blocks[item.use]);
+    let parsed = null;
+    try {
+      parsed = block?.params.safeParse(resolveCond(item.params ?? {}, levels));
+    } catch {
+      parsed = null; // unresolvable condition: fall back to the block's fixed columns
+    }
+    cols = Object.keys(blockColumns(block, parsed?.success ? parsed.data : null));
+  }
+  const blank = Object.fromEntries(cols.map((c) => [c, null]));
+  return rows.filter((r) => {
+    try {
+      return evalExpr(filter, { ...blank, ...r });
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function computeMeasure(spec, m, participant) {
+  if (m.fn === "diff") throw new Error("diff measures are computed after the others.");
   if (["d_prime", "meta_d", "mratio"].includes(m.fn)) {
-    const rows = participant.rows[m.from] ?? [];
+    const rows = filterRows(spec, m.from, participant.rows[m.from] ?? [], m.filter, participant.levels);
     if (!rows.length) return null;
     if (m.fn === "d_prime") return typeOne(rows)?.d_prime ?? null;
     const { params } = stepParams(spec, m.from, participant.levels);
@@ -45,7 +71,7 @@ export function computeMeasure(spec, m, participant) {
     return m.fn === "meta_d" ? fit.meta_d : fit.mratio;
   }
   const [id, col] = (m.of ?? "").split(".");
-  const rows = participant.rows[id] ?? [];
+  const rows = filterRows(spec, id, participant.rows[id] ?? [], m.filter, participant.levels);
   if (m.fn === "count") return col ? rows.filter((r) => r[col] !== null && r[col] !== undefined).length : rows.length;
   if (m.fn === "first") {
     const summary = participant.summaries?.[id]?.[col];
@@ -93,11 +119,19 @@ export function scoreParticipant(spec, participant) {
   participant.summaries = summaries(spec, participant);
   const measures = {};
   for (const [name, m] of Object.entries(spec.measures ?? {})) {
+    if (m.fn === "diff") continue;
     try {
       measures[name] = computeMeasure(spec, m, participant);
     } catch {
       measures[name] = null;
     }
+  }
+  // Differences between measures, e.g. a congruency effect.
+  for (const [name, m] of Object.entries(spec.measures ?? {})) {
+    if (m.fn !== "diff") continue;
+    const a = measures[m.a];
+    const b = measures[m.b];
+    measures[name] = typeof a === "number" && typeof b === "number" && Number.isFinite(a) && Number.isFinite(b) ? a - b : null;
   }
   const values = expressionValues(measures, participant.summaries);
   const exclusions = {};

@@ -88,7 +88,7 @@ export const server = http.createServer(async (req, res) => {
 // Only simple numeric timing fields are kept from the browser.
 function sanitiseMeta(meta) {
   const out = {};
-  for (const k of ["refresh_hz", "dropped_frame_prop", "hidden_count", "blur_count", "screen_w", "screen_h", "fullscreen_exits"]) {
+  for (const k of ["refresh_hz", "dropped_frame_prop", "hidden_count", "blur_count", "screen_w", "screen_h", "fullscreen_exits", "custom_errors"]) {
     if (typeof meta[k] === "number" && Number.isFinite(meta[k])) out[k] = meta[k];
   }
   if (typeof meta.user_agent === "string") out.user_agent = meta.user_agent.slice(0, 300);

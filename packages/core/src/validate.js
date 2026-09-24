@@ -2,7 +2,8 @@
 // valid in every condition, expressions only use names that exist.
 // Errors block review; warnings are shown to the reviewer.
 import { parseSpec, formatIssues } from "./schema.js";
-import { getBlock } from "./blocks/index.js";
+import { getBlock, blockColumns } from "./blocks/index.js";
+import { syntaxError } from "./blocks/custom.js";
 import { listConditions, resolveCond, findConds } from "./conditions.js";
 import { stepId } from "./compile.js";
 import { parseExpr, exprIdentifiers } from "./expr.js";
@@ -31,6 +32,8 @@ export function validateSpec(input) {
 
   // Sequence.
   const seen = new Map(); // id -> { block, index }
+  const resolvedCols = new Map(); // id -> { column: type } (custom blocks declare their own)
+  const colsOf = (id) => resolvedCols.get(id) ?? getBlock(seen.get(id)?.block)?.columns ?? {};
   spec.sequence.forEach((item, i) => {
     const path = `sequence.${i}`;
     const ref = spec.blocks[item.use];
@@ -81,6 +84,14 @@ export function validateSpec(input) {
       if (block.ref.startsWith("dots") && p.keys.left === p.keys.right) {
         err(`${path}.params.keys`, "Left and right keys must differ.");
       }
+      if (block.custom && c === conditions[0]) {
+        const bad = syntaxError(p.code);
+        if (bad) err(`${path}.params.code`, `The code doesn't compile: ${bad}`);
+        if (!/api\.done\s*\(/.test(p.code)) err(`${path}.params.code`, "The code never calls api.done(), so the study would get stuck on this step.");
+        if (!/api\.record\s*\(/.test(p.code) && p.expected_rows > 0) err(`${path}.params.code`, "The code never calls api.record(row), so no data would be saved.");
+        warn(`${path}`, `Step "${id}" runs custom code: unverified, can't be simulated, and needs the lab head's approval.`);
+      }
+      if (c === conditions[0]) resolvedCols.set(id, blockColumns(block, p));
     }
     seen.set(id, { block: ref, index: i, item });
   });
@@ -90,8 +101,29 @@ export function validateSpec(input) {
   for (const [id, info] of seen) {
     for (const k of getBlock(info.block)?.summaryKeys ?? []) summaryIds.add(`${id}.${k}`);
   }
+  const checkFilter = (path, stepName, filter) => {
+    if (!filter) return;
+    const cols = seen.has(stepName) ? Object.keys(colsOf(stepName)) : [];
+    try {
+      parseExpr(filter);
+      for (const n of exprIdentifiers(filter)) {
+        if (!cols.includes(n)) err(`${path}.filter`, `"${n}" is not a column of step "${stepName}". Columns: ${cols.join(", ")}.`);
+      }
+    } catch (e) {
+      err(`${path}.filter`, e.message);
+    }
+  };
   for (const [name, m] of Object.entries(spec.measures)) {
     const path = `measures.${name}`;
+    if (m.fn === "diff") {
+      for (const k of ["a", "b"]) {
+        const other = m[k] && spec.measures[m[k]];
+        if (!other) err(`${path}.${k}`, `diff needs ${k}: the name of another measure.`);
+        else if (other.fn === "diff") err(`${path}.${k}`, "diff can't use another diff measure.");
+      }
+      continue;
+    }
+    checkFilter(path, m.from ?? (m.of ?? "").split(".")[0], m.filter);
     if (["d_prime", "meta_d", "mratio"].includes(m.fn)) {
       const src = m.from && seen.get(m.from);
       if (!src) {
@@ -119,10 +151,11 @@ export function validateSpec(input) {
       continue;
     }
     const block = getBlock(src.block);
-    if (col && !(col in block.columns) && !(block.summaryKeys ?? []).includes(col)) {
-      err(`${path}.of`, `"${block.ref}" has no column "${col}". Columns: ${Object.keys(block.columns).join(", ")}.`);
+    const cols = colsOf(id);
+    if (col && !(col in cols) && !(block.summaryKeys ?? []).includes(col)) {
+      err(`${path}.of`, `"${block.ref}" has no column "${col}". Columns: ${Object.keys(cols).join(", ")}.`);
     }
-    if (!col && m.fn !== "count") err(`${path}.of`, `Name a column, e.g. "${id}.${Object.keys(block.columns)[0]}".`);
+    if (!col && m.fn !== "count") err(`${path}.of`, `Name a column, e.g. "${id}.${Object.keys(cols)[0]}".`);
     if (m.where && !/^\s*(==|!=|<=|>=|<|>)\s*-?\d+(\.\d+)?\s*$/.test(m.where)) err(`${path}.where`, `Use a comparison like "< 200".`);
   }
 
@@ -185,7 +218,7 @@ export function validateSpec(input) {
         const ok =
           p.target === "minutes" ||
           p.target in spec.measures ||
-          (seen.has(id) && (!col || col === "confidence_levels_used" || col in getBlock(seen.get(id).block).columns || summaryIds.has(p.target)));
+          (seen.has(id) && (!col || col === "confidence_levels_used" || col in colsOf(id) || summaryIds.has(p.target)));
         if (!ok) err(`pilot.checks.${i}.expect`, `"${p.target}" is not a step, column, or measure.`);
       }
     } catch (e) {

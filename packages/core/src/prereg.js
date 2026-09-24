@@ -91,11 +91,27 @@ function describeStep(block, p, item, conds) {
     return `: ${total} trials in ${p.blocks} block(s), ${p.base_dots} base dots, ${p.stim_ms} ms presentation, ${sc}${fb}${conf}${p.record === false ? ". Practice, not analysed." : "."}`;
   }
   if (block.ref.startsWith("likert")) return `: ${p.instrument ?? "questionnaire"}, ${p.items.length} items, ${p.scale.min}-${p.scale.max} scale.`;
+  if (block.custom) return `: custom jsPsych code. ${textToPlain(p.description)} Records ${p.expected_rows} row(s) with columns ${Object.keys(p.columns).join(", ")}. The code is part of the versioned spec.`;
+  if (block.ref.startsWith("choice-rt")) {
+    const total = (p.trials_per_block ?? p.trials ?? p.stimuli.reduce((a, x) => a + x.weight, 0)) * p.blocks;
+    const types = [...new Set(p.stimuli.map((x) => x.type))];
+    return `: ${total} trials in ${p.blocks} block(s); ${p.stimuli.length} stimuli (${types.join(", ")}); responses ${p.responses
+      .map((r) => `${r.name} = ${r.key.toUpperCase()}`)
+      .join(", ")}; ${p.response_window_ms ? `${p.response_window_ms} ms response window` : "no time limit"}; feedback ${p.feedback}${
+      p.record === false ? ". Practice, not analysed." : "."
+    }`;
+  }
   if (block.ref.startsWith("attention")) return `: "${textToPlain(p.item)}" (correct: ${p.correct}).`;
   return ".";
 }
 
 function describeMeasure(m) {
+  if (m.fn === "diff") return `${m.a} minus ${m.b}`;
+  const base = describeMeasureBase(m);
+  return m.filter ? `${base}, trials where ${m.filter}` : base;
+}
+
+function describeMeasureBase(m) {
   const map = {
     mean: `mean of ${m.of}`,
     sd: `standard deviation of ${m.of}`,

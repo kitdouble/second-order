@@ -229,6 +229,178 @@ function dots(step, ctx) {
   return nodes;
 }
 
+// ---- Choice reaction time (flanker, Stroop, Simon...) ---------------------
+
+const POS = {
+  center: "",
+  left: "transform: translateX(-28vw);",
+  right: "transform: translateX(28vw);",
+  top: "transform: translateY(-22vh);",
+  bottom: "transform: translateY(22vh);",
+};
+
+function choiceRt(step, ctx) {
+  const p = step.params;
+  const byId = Object.fromEntries(p.stimuli.map((s) => [s.id, s]));
+  const keyToName = Object.fromEntries(p.responses.map((r) => [r.key.toLowerCase(), r.name]));
+  const keys = p.responses.map((r) => r.key.toLowerCase());
+  const reminder = p.show_key_reminder
+    ? `<p class="so-keys">${p.responses.map((r) => escapeHtml(r.label ?? `${r.key.toUpperCase()} = ${r.name}`)).join(" &nbsp;&nbsp; ")}</p>`
+    : "";
+  const family = p.font === "mono" ? "ui-monospace, Menlo, Consolas, monospace" : "system-ui, sans-serif";
+  const scale = p.confidence ? p.confidence.scale : null;
+  const nodes = [];
+
+  step.items.forEach((it, idx) => {
+    if (p.break_between_blocks && idx > 0 && it.block !== step.items[idx - 1].block) {
+      nodes.push({ type: htmlButton, stimulus: textPage(`<p>End of block ${it.block} of ${p.blocks}. Take a short break.</p>`), choices: ["Continue"] });
+    }
+    const st = byId[it.stimulus_id];
+    const row = { trial: it.trial, block: it.block, stimulus_id: it.stimulus_id, type: it.type, correct_response: it.correct_response };
+    if (p.fixation_ms > 0) nodes.push({ type: htmlKeyboard, stimulus: `<div class="so-fix">+</div>`, choices: "NO_KEYS", trial_duration: p.fixation_ms });
+    const style = `font-size:${p.font_size}px;font-family:${family};${st.color ? `color:${st.color};` : ""}${POS[st.position] ?? ""}letter-spacing:0.05em;white-space:pre;`;
+    nodes.push({
+      type: htmlKeyboard,
+      stimulus: `<div class="so-stim" style="${style}">${escapeHtml(st.text)}</div>`,
+      choices: keys,
+      stimulus_duration: p.stim_ms,
+      trial_duration: p.response_window_ms,
+      response_ends_trial: true,
+      prompt: reminder,
+      on_finish: (data) => {
+        const k = data.response ? String(data.response).toLowerCase() : null;
+        row.response = k ? keyToName[k] ?? null : null;
+        row.timeout = !k;
+        row.correct = row.response === it.correct_response;
+        row.rt = k ? Math.round(data.rt) : null;
+        if (!scale || row.timeout) {
+          row.confidence = null;
+          row.confidence_rt = null;
+          ctx.record(step, it.trial, row);
+        }
+      },
+    });
+    if (scale) {
+      const levels = [];
+      for (let v = scale[0]; v <= scale[1]; v++) levels.push(String(v));
+      nodes.push({
+        timeline: [
+          {
+            type: htmlButton,
+            stimulus: `<p>How confident are you?</p>`,
+            choices: levels,
+            prompt: `<div class="so-scale"><span>${escapeHtml(p.confidence.labels[0])}</span><span>${escapeHtml(p.confidence.labels[1])}</span></div>`,
+            button_layout: "flex",
+            on_finish: (data) => {
+              row.confidence = scale[0] + data.response;
+              row.confidence_rt = Math.round(data.rt);
+              ctx.record(step, it.trial, row);
+            },
+          },
+        ],
+        conditional_function: () => !row.timeout,
+      });
+    }
+    if (p.feedback !== "never") {
+      nodes.push({
+        timeline: [
+          {
+            type: htmlKeyboard,
+            stimulus: () =>
+              row.timeout ? `<p class="so-fb so-no">Too slow</p>` : row.correct ? `<p class="so-fb so-ok">Correct</p>` : `<p class="so-fb so-no">Wrong</p>`,
+            choices: "NO_KEYS",
+            trial_duration: 600,
+          },
+        ],
+        conditional_function: () => p.feedback === "always" || !row.correct,
+      });
+    }
+    if (p.iti_ms > 0) nodes.push({ type: htmlKeyboard, stimulus: "", choices: "NO_KEYS", trial_duration: p.iti_ms });
+  });
+  return nodes;
+}
+
+// ---- Custom code (sandboxed) ----------------------------------------------
+
+const MAX_ROWS = 5000;
+
+function cleanRow(row, columns) {
+  const out = {};
+  for (const col of Object.keys(columns)) {
+    const v = row?.[col];
+    if (v === undefined || v === null) out[col] = null;
+    else if (typeof v === "number" || typeof v === "boolean") out[col] = Number.isFinite(v) || typeof v === "boolean" ? v : null;
+    else out[col] = String(typeof v === "object" ? JSON.stringify(v) : v).slice(0, 2000);
+  }
+  return out;
+}
+
+function customCode(step, ctx) {
+  const p = step.params;
+  return [
+    {
+      type: htmlKeyboard,
+      stimulus: `<div class="so-text"><p>Loading...</p></div>`,
+      choices: "NO_KEYS",
+      trial_duration: null,
+      response_ends_trial: false,
+      on_load: () => {
+        const origin = location.origin;
+        const frame = document.createElement("iframe");
+        frame.setAttribute("sandbox", "allow-scripts");
+        frame.className = "so-sandbox";
+        frame.setAttribute("title", "Task");
+        const csp =
+          `default-src 'none'; script-src ${origin} 'unsafe-inline' 'unsafe-eval'; style-src ${origin} 'unsafe-inline'; ` +
+          `img-src ${origin} https: data: blob:; media-src ${origin} https: data: blob:; font-src ${origin} data:`;
+        frame.srcdoc =
+          `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
+          `<meta http-equiv="Content-Security-Policy" content="${csp}">` +
+          `<link rel="stylesheet" href="${origin}/runtime/v1/runtime.css"></head>` +
+          `<body><div id="so-root"></div><script src="${origin}/runtime/v1/sandbox.js"></script></body></html>`;
+        let rows = 0;
+        let ended = false;
+        const finish = () => {
+          if (ended) return;
+          ended = true;
+          window.removeEventListener("message", onMessage);
+          frame.remove();
+          ctx.finish();
+        };
+        const fail = (message) => {
+          ctx.timing.meta.custom_errors = (ctx.timing.meta.custom_errors ?? 0) + 1;
+          if (ended) return;
+          window.removeEventListener("message", onMessage);
+          frame.remove();
+          const host = document.querySelector("#jspsych-html-keyboard-response-stimulus") ?? document.body;
+          host.innerHTML =
+            `<div class="so-text"><p>Something went wrong in this part of the study. Please continue.</p>` +
+            (ctx.preview ? `<pre class="so-err">${escapeHtml(message)}</pre>` : "") +
+            `<p><button class="jspsych-btn" id="so-continue">Continue</button></p></div>`;
+          document.getElementById("so-continue").onclick = () => {
+            ended = true;
+            ctx.finish();
+          };
+        };
+        const onMessage = (e) => {
+          if (e.source !== frame.contentWindow || !e.data || typeof e.data.so !== "string") return;
+          const m = e.data;
+          if (m.so === "ready") {
+            frame.contentWindow.postMessage({ so: "start", code: p.code, params: p.params, condition: ctx.levels, seed: `${ctx.seed}:${step.id}` }, "*");
+            frame.focus();
+          } else if (m.so === "row") {
+            if (rows >= MAX_ROWS) return;
+            ctx.record(step, rows++, cleanRow(m.row, p.columns));
+          } else if (m.so === "done") finish();
+          else if (m.so === "error") fail(String(m.message ?? "error").slice(0, 500));
+        };
+        window.addEventListener("message", onMessage);
+        document.body.appendChild(frame);
+      },
+    },
+  ];
+}
+
 /** A zero-length trial that sends queued data between steps. */
 export function flushNode(flush) {
   return { type: htmlKeyboard, stimulus: "", choices: "NO_KEYS", trial_duration: 0, on_start: flush };
@@ -241,4 +413,6 @@ export const RENDERERS = {
   "likert-scale@1": likert,
   "debrief@1": debrief,
   "dots-2afc-confidence@1": dots,
+  "choice-rt@1": choiceRt,
+  "custom-jspsych@1": customCode,
 };
