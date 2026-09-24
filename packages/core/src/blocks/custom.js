@@ -39,7 +39,7 @@ export default {
     "jsPsychSurveyMultiChoice, jsPsychSurveyText, jsPsychInstructions, jsPsychCallFunction, jsPsychPreload). " +
     "The code receives `api`: api.root (element to render into), api.params, api.condition, api.rng() (seeded random 0-1), " +
     "api.record(row) (one row per trial, keys = declared columns) and api.done() (call once at the end). " +
-    "Needs the lab head's approval unless it's an unchanged lab library task. Simulation and QA can't model it: pilot it.",
+    "Approval follows the usual tier rules (spend-based); it isn't gated by the code itself. Simulation and QA can't model it: pilot it.",
   params,
   columns: {}, // declared per study in params.columns
   columnsFor: (p) => p.columns,

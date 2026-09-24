@@ -24,7 +24,7 @@ import { prolificClient } from "@so/core/prolific";
 import { q, one, tx, j } from "./db.js";
 import { audit } from "./audit.js";
 import { newToken, sha256 } from "./tokens.js";
-import { customCodeVetted, libraryWarnings } from "./library.js";
+import { libraryWarnings } from "./library.js";
 
 export class ServiceError extends Error {
   constructor(message, status = 400) {
@@ -336,15 +336,12 @@ export async function requestReview(actor, slug, summary = null) {
   };
 }
 
-/** Who may approve this gate for this study? */
+/**
+ * Who may approve this gate for this study? Approval is gated on estimated Prolific spend only
+ * (per the tier's cap) -- what the study's code does, custom or not, doesn't affect who can approve it.
+ */
 export async function approvalRight(actor, s, spec, gate) {
   if (isLabHead(actor)) return { ok: true };
-  if (spec.sequence.some((it) => getBlock(spec.blocks[it.use])?.custom) && !(await customCodeVetted(spec))) {
-    return {
-      ok: false,
-      reason: "This study runs custom code that isn't an unchanged lab library task, so the lab head approves it whatever the tier.",
-    };
-  }
   if (s.owner_id !== actor.user.id) return { ok: false, reason: "Only the lab head can approve other people's studies." };
   if (actor.user.tier !== "trusted") return { ok: false, reason: "Supervised studies need the lab head's approval." };
   const spend = estimatedSpend(spec, gate === "pilot" ? pilotN(spec) : spec.recruitment.max_n);

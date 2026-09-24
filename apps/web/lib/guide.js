@@ -71,7 +71,7 @@ If nothing fits, in this order:
      keys are dropped. Set expected_rows to the number of api.record calls (a pilot check enforces it) and est_minutes.
    - Validation checks it compiles and calls api.record and api.done. It can't check behaviour: QA and simulation
      use placeholder rows, so there is no power analysis. Tell the person to click through the preview themselves.
-   - Any study with custom code needs the lab head's approval, whatever the person's tier. Say so up front.
+   - Approval for custom code follows the usual tier rules (spend-based), same as any other study; it isn't gated by the code itself. It can't be simulated, so tell the person to pilot it.
    See example_spec name "custom".
 If a custom task would be useful to others, suggest the lab head adds it to the library (library action "add", lab head
 only). Tasks used by several studies are worth turning into a verified block (CLAUDE.md in the repo explains how).

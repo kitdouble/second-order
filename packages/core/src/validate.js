@@ -89,7 +89,7 @@ export function validateSpec(input) {
         if (bad) err(`${path}.params.code`, `The code doesn't compile: ${bad}`);
         if (!/api\.done\s*\(/.test(p.code)) err(`${path}.params.code`, "The code never calls api.done(), so the study would get stuck on this step.");
         if (!/api\.record\s*\(/.test(p.code) && p.expected_rows > 0) err(`${path}.params.code`, "The code never calls api.record(row), so no data would be saved.");
-        warn(`${path}`, `Step "${id}" runs custom code: unverified, can't be simulated, and needs the lab head's approval.`);
+        warn(`${path}`, `Step "${id}" runs custom code: unverified, can't be simulated. Pilot it before real participants see it.`);
       }
       if (c === conditions[0]) resolvedCols.set(id, blockColumns(block, p));
     }

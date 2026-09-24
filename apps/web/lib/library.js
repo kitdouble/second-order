@@ -120,8 +120,9 @@ export async function getLibraryEntry(ref) {
     params: e.params,
     snippet: librarySnippet(e),
     how_to_use:
-      "Paste the block alias into blocks and the step into sequence. Keep library and params unchanged: then the step counts as vetted " +
-      "(no lab head approval needed for custom code). Changing params makes it new custom code. Measures can use the columns listed.",
+      "Paste the block alias into blocks and the step into sequence. Keep library and params unchanged: then the step counts as vetted, " +
+      "so it's recorded as coming from a reviewed source. Changing params makes it new custom code (approval still just follows the usual " +
+      "tier spend rules, same as any study). Measures can use the columns listed.",
   };
 }
 
@@ -156,7 +157,7 @@ export async function libraryWarnings(spec, warnings) {
     if (!matchesLibrary(spec, c.item, e)) {
       out.push({
         path: `${path}.library`,
-        message: `Step "${c.id}" differs from lab library task ${c.item.library}, so it counts as new${getBlock(e.block_ref)?.custom ? " custom code (lab head approval)" : " settings"}.`,
+        message: `Step "${c.id}" differs from lab library task ${c.item.library}, so it counts as new${getBlock(e.block_ref)?.custom ? " custom code and can't be simulated, so pilot it" : " settings"}.`,
       });
     } else if (getBlock(e.block_ref)?.custom && !e.retired_at) {
       out = out.filter((w) => !(w.path === path && /runs custom code/.test(w.message)));
