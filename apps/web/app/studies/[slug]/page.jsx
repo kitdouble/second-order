@@ -788,6 +788,8 @@ function DataTab({ d }) {
         {dl("trials.csv", "trials.csv")}
         {dl("participants.csv", "Pilot participants.csv", "pilot")}
         {dl("trials.csv", "Pilot trials.csv", "pilot")}
+        {dl("participants.csv", "Preview participants.csv", "preview")}
+        {dl("trials.csv", "Preview trials.csv", "preview")}
         {dl("analysis.R", "analysis.R")}
         {dl("prereg.md", "prereg.md")}
         {dl("spec.yaml", "spec.yaml")}

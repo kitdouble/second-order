@@ -52,7 +52,8 @@ instructions, then review action "submit_findings" with findings [{severity, pat
 Severity: blocker | concern | consider. Say nothing rather than invent issues. You did not write the study.
 
 ## Analysis
-get_data returns pseudonymised CSV (session ids only). report kind "r_script" gives the R script that reproduces
+get_data returns pseudonymised CSV (session ids only). Use phase "preview" to inspect data from preview links
+(check column names, trial counts and measures before a pilot). report kind "r_script" gives the R script that reproduces
 the platform's measures, exclusions and Bayes factor; the R output is the result of record.
 When you run exploratory analyses, save them with save kind "analysis", exploratory true, and the data_hash.
 Suggest analyses freely before data (they become part of the plan); after data, label everything exploratory.

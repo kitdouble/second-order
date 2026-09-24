@@ -18,6 +18,7 @@ import {
   getBlock,
   stepId,
   estimateMinutes,
+  scoreParticipant,
 } from "@so/core";
 import { prolificClient } from "@so/core/prolific";
 import { q, one, tx, j } from "./db.js";
@@ -554,9 +555,53 @@ export async function studyStatus(actor, slug) {
   };
 }
 
+/**
+ * Preview sessions (researcher click-throughs) for the most recently previewed
+ * version. Kept apart from pilot and main data; scored on the fly, including
+ * unfinished sessions, so the data format can be checked before a pilot.
+ */
+async function previewData(s, { kind, offset, limit }) {
+  const latest = await one("SELECT hash FROM sessions WHERE study_id = $1 AND phase = 'preview' ORDER BY started_at DESC LIMIT 1", [s.id]);
+  if (!latest) fail("No preview sessions yet. Open a preview link and click through a condition first.", 404);
+  const v = await versionOf(s, latest.hash);
+  const ss = (
+    await q("SELECT id, levels, condition, status FROM sessions WHERE study_id = $1 AND phase = 'preview' AND hash = $2 ORDER BY started_at DESC LIMIT 50", [
+      s.id,
+      latest.hash,
+    ])
+  ).rows;
+  const trials = (
+    await q("SELECT session_id, step, data FROM trials WHERE session_id = ANY($1) ORDER BY session_id, step, trial_index", [ss.map((x) => x.id)])
+  ).rows;
+  const bySession = {};
+  for (const t of trials) ((bySession[t.session_id] ??= {})[t.step] ??= []).push(t.data);
+  const sessions = ss.map((x) => {
+    const rows = bySession[x.id] ?? {};
+    let scored;
+    try {
+      scored = scoreParticipant(v.spec, { levels: x.levels, rows });
+    } catch {
+      scored = { measures: {}, summaries: {}, exclusions: {}, excluded: null };
+    }
+    return { session_id: x.id, condition: x.condition, levels: x.levels, rows, scored, status: x.status === "started" ? "unfinished" : x.status };
+  });
+  const note = `Preview data for version ${shortHash(v.hash)}: researcher click-throughs, never analysed. Unfinished sessions are included.`;
+  const participants = participantsCsv(v.spec, sessions);
+  if (kind === "participants") return { phase: "preview", hash: shortHash(v.hash), n_sessions: sessions.length, note, csv: participants };
+  return { phase: "preview", hash: shortHash(v.hash), note, ...pageCsv(trialsCsv(v.spec, sessions), offset, limit) };
+}
+
+function pageCsv(full, offset, limit) {
+  const lines = full.split("\n");
+  const body = lines.slice(1).filter(Boolean);
+  const page = body.slice(offset, offset + limit);
+  return { n_rows: body.length, offset, returned: page.length, more: offset + page.length < body.length, csv: [lines[0], ...page].join("\n") + "\n" };
+}
+
 /** Pseudonymised data: session ids only. Prolific IDs are never returned. */
 export async function getData(actor, slug, { phase = "main", kind = "participants", offset = 0, limit = 5000 } = {}) {
   const s = await loadStudy(actor, slug);
+  if (phase === "preview") return previewData(s, { kind, offset, limit });
   const deps = (await q("SELECT id, hash FROM deployments WHERE study_id = $1 AND phase = $2 ORDER BY started_at", [s.id, phase])).rows;
   if (!deps.length) fail(`No ${phase} data yet.`, 404);
   const v = await versionOf(s, deps.at(-1).hash);

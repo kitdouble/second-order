@@ -69,12 +69,13 @@ export const TOOLS = [
     description:
       "Pseudonymised data as CSV (session ids only). kind participants: one row per person with measures and exclusion flags. " +
       "kind trials: one row per trial, paged with offset/limit. Returns a data_hash to cite when saving analyses. " +
+      "phase preview returns the data from preview links, to check the data format before a pilot. " +
       'Example: {"study": "dots-feedback-mratio", "kind": "participants"}.',
     inputSchema: {
       type: "object",
       properties: {
         study: str("Study slug."),
-        phase: str("main or pilot.", { enum: ["main", "pilot"] }),
+        phase: str("main, pilot, or preview (researcher click-throughs of the latest previewed version).", { enum: ["main", "pilot", "preview"] }),
         kind: str("participants or trials.", { enum: ["participants", "trials"] }),
         offset: { type: "integer", minimum: 0 },
         limit: { type: "integer", minimum: 1, maximum: 20000 },
