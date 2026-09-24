@@ -20,8 +20,8 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0c0a09;
-    --panel: #1c1917;
+    --bg: #1a1410;
+    --panel: #2a231d;
     --ink: #f5f5f4;
     --muted: #a8a29e;
     --faint: #78716c;
