@@ -3,7 +3,7 @@
 // tools use, then redirects back with a message.
 import { redirect } from "next/navigation";
 import { headers, cookies } from "next/headers";
-import { requireActor, bootstrapLabHead, consumeLoginLink, COOKIE } from "@/lib/auth";
+import { requireActor, bootstrapLabHead, consumeLoginLink, recoverLabHead, COOKIE } from "@/lib/auth";
 import { baseUrlFrom } from "@/lib/url";
 import * as S from "@/lib/studies";
 import * as People from "@/lib/people";
@@ -255,4 +255,23 @@ export async function retireTaskAction(fd) {
     const r = await L.retireFromLibrary(actor, f(fd, "name"));
     return { message: `Retired ${r.retired.join(", ")}. ${r.note}` };
   });
+}
+
+// ---- passkeys & recovery
+
+export async function removePasskeyAction(fd) {
+  const actor = await requireActor();
+  await run("/settings", async () => {
+    const P = await import("@/lib/passkeys");
+    await P.removePasskey(actor.user, f(fd, "id"));
+    return { message: "Passkey removed." };
+  });
+}
+
+export async function recoverAction(fd) {
+  const r = await recoverLabHead(f(fd, "code"));
+  if (!r.ok) redirect(to("/setup", "err", r.error));
+  const jar = await cookies();
+  jar.set(COOKIE, r.session.session, { httpOnly: true, sameSite: "lax", path: "/", maxAge: r.session.maxAge, secure: (await base()).startsWith("https") });
+  redirect(to("/settings", "msg", `Signed in as ${r.session.user.name}. Add a passkey so this doesn't happen again.`));
 }

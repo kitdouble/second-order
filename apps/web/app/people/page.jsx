@@ -48,6 +48,7 @@ export default async function People({ searchParams }) {
               <th>Tier</th>
               <th>Studies</th>
               <th>Last sign-in</th>
+              <th>Passkey</th>
               <th></th>
             </tr>
           </thead>
@@ -75,6 +76,7 @@ export default async function People({ searchParams }) {
                 <td className="small">
                   <When at={p.last_sign_in} />
                 </td>
+                <td className="small">{Number(p.passkeys) > 0 ? <span className="badge ok">yes</span> : <span className="muted">no</span>}</td>
                 <td>
                   <div className="row">
                     <form action={issueLinkAction} className="inline">

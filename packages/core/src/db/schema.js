@@ -246,6 +246,26 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS audit_study ON audit_log (study_id, at DESC);
 
+-- Passkeys (WebAuthn). A passkey is tied to the site's hostname (its "RP ID").
+CREATE TABLE IF NOT EXISTS passkeys (
+  id            TEXT PRIMARY KEY,            -- credential id, base64url
+  user_id       UUID NOT NULL REFERENCES users(id),
+  public_key    TEXT NOT NULL,               -- base64url COSE key
+  counter       BIGINT NOT NULL DEFAULT 0,
+  transports    JSONB,
+  rp_id         TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS passkeys_user ON passkeys (user_id);
+CREATE TABLE IF NOT EXISTS webauthn_challenges (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  challenge   TEXT NOT NULL,
+  user_id     UUID,
+  expires_at  TIMESTAMPTZ NOT NULL
+);
+
 -- The lab library: ready-made steps (block + params) anyone in the lab can use.
 -- Versions are immutable; adding the same name again makes a new version.
 CREATE TABLE IF NOT EXISTS library_entries (

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { webActor } from "@/lib/auth";
 import { getClient, validRedirect } from "@/lib/oauth";
 import { consentAction } from "@/app/actions";
+import { PasskeySignIn } from "@/components/passkey";
 
 export const dynamic = "force-dynamic";
 
@@ -24,8 +25,9 @@ export default async function Authorize({ searchParams }) {
     return (
       <div className="hero">
         <h1>Sign in first</h1>
-        <p>
-          Open your Second Order sign-in link in this browser, then try connecting again. <Link href="/">Home</Link>
+        <PasskeySignIn next={`/oauth/authorize?${new URLSearchParams(Object.entries(sp).filter(([, v]) => typeof v === "string")).toString()}`} />
+        <p className="small muted" style={{ marginTop: 16 }}>
+          No passkey yet? Open your Second Order sign-in link in this browser, then try connecting again. <Link href="/">Home</Link>
         </p>
       </div>
     );

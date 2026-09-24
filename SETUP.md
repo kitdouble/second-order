@@ -123,10 +123,17 @@ Check: `https://<your-project-id>.web.app/api/ingest/health` and
    step 7.4. **Run** the trigger again.
 3. Open `https://2ndorder.live/setup` (or the web.app address), enter your name
    and the setup code. You're signed in as lab head. This only works once.
+4. Click **Add a passkey** (on the Studies page or in Settings) and use Touch ID,
+   Face ID or your phone. From then on, **Sign in with a passkey** on the home page.
+   Passkeys belong to one address, so add yours on the address you'll keep using
+   (2ndorder.live once it works).
+
+Keep the setup code: if you're ever locked out (no passkey on this device, session
+expired), `/setup` signs the lab head in with it.
 
 To add students and colleagues: **People** → add a name and tier → send them the
-one-time sign-in link it shows. For a new laptop or phone, make them a new link
-the same way (there are no passwords).
+one-time sign-in link it shows. They add a passkey after signing in (the People
+page shows who has), so they only need a link once. There are no passwords.
 
 ## 10. Connect Claude
 

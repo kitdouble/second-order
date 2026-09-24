@@ -1,6 +1,6 @@
 import { userCount } from "@/lib/auth";
 import { dbConfigured } from "@/lib/db";
-import { setupAction } from "@/app/actions";
+import { setupAction, recoverAction } from "@/app/actions";
 import { Flash } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +8,27 @@ export const dynamic = "force-dynamic";
 export default async function Setup({ searchParams }) {
   const sp = await searchParams;
   if (!dbConfigured()) return <p>Connect the database first (SETUP.md, step 7).</p>;
-  if ((await userCount()) > 0) return <p>Setup is done. Sign in with your link.</p>;
+  if ((await userCount()) > 0) {
+    return (
+      <div className="hero">
+        <h1>Lab head recovery</h1>
+        <p className="muted">
+          Setup is done. If you're the lab head and can't sign in (session expired, no passkey on this device), the setup code signs you in. Then
+          add a passkey in Settings.
+        </p>
+        <Flash sp={sp} />
+        <form action={recoverAction}>
+          <label htmlFor="code">Setup code (the BOOTSTRAP_TOKEN value in Secret Manager)</label>
+          <input id="code" name="code" required style={{ width: "100%" }} autoComplete="off" />
+          <p>
+            <button className="primary" type="submit">
+              Sign in as lab head
+            </button>
+          </p>
+        </form>
+      </div>
+    );
+  }
   if (!process.env.BOOTSTRAP_TOKEN) {
     return (
       <div className="hero">
