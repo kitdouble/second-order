@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "second-order-509605",
     "public": "hosting/public",
     "rewrites": [
       {
