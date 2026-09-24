@@ -17,6 +17,7 @@ export default async function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
+        <link rel="icon" href="/favicon.ico" />
         <link rel="icon" href="/assets/light_without_text.png" media="(prefers-color-scheme: light)" />
         <link rel="icon" href="/assets/dark_without_text.png" media="(prefers-color-scheme: dark)" />
       </head>
