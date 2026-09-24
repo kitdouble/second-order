@@ -6,7 +6,8 @@ researcher app and MCP server; `services/ingest` stores participant data. Pushin
 
 ## Commands
 - `npm test` runs the core tests. Run it before every commit.
-- `npm run build:runtime` rebuilds `hosting/public/runtime/v1/` (committed). Run it after any change under `runtime/`
+- `npm run build:runtime` rebuilds `hosting/public/runtime/v1/` and `hosting/public/s/index.html` (committed; the
+  page is generated from `runtime/src/index.html` with content-hashed asset URLs, so browsers never run a stale build). Run it after any change under `runtime/`
   or to `packages/core/src/runtime.js`, then `node scripts/check-runtime.mjs` (Cloud Build runs the same check and
   fails if the committed bundle is stale).
 - `node scripts/embed-examples.mjs` after editing anything in `packages/core/examples/`.
@@ -21,8 +22,10 @@ researcher app and MCP server; `services/ingest` stores participant data. Pushin
   check a reproduction (the flanker example is a good one: R and JS agree to the last digit).
 - Keep secrets, Prolific IDs and anything identifying out of logs, the agent's tools and exports.
 
-## When a lab member writes custom code often: turn it into a block
-Custom jsPsych code (`custom-jspsych@1`) is fine for one study. If the same task keeps coming back, make it a
+## The lab library, and when to turn a task into a block
+Custom jsPsych code (`custom-jspsych@1`) is fine for one study. To share it, the lab head adds the step to the lab
+library (MCP tool `library`, action `add`; entries live in the `library_entries` table, and the Library page lists
+them). Unchanged library code counts as vetted. If a library task keeps being used (the Library page flags 3+ studies), make it a
 proper block so it gets validation, simulation, QA, power analysis and pilot checks. Use `blocks/choice.js` as the
 model. Checklist:
 

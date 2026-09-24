@@ -80,3 +80,26 @@ test("R script mirrors filters and diffs", () => {
   assert.match(r, /s\[\["type"\]\] == "incongruent"/);
   assert.match(r, /out\[\["flanker_rt"\]\] <- as\.numeric\(out\[\["rt_incongruent"\]\]\) - as\.numeric\(out\[\["rt_congruent"\]\]\)/);
 });
+
+test("library: every built-in block has a runnable demo", () => {
+  for (const b of c.blockCatalog()) {
+    const d = c.demoSpec({ title: b.title, ref: b.ref, params: c.builtinDemoParams(b.ref) });
+    assert.equal(d.ok, true, `${b.ref}: ${JSON.stringify(d.errors)}`);
+  }
+});
+
+test("library: snippet round-trips and matching detects edits", () => {
+  const params = c.builtinDemoParams("custom-jspsych@1");
+  const entry = { name: "go-nogo", version: 2, block_ref: "custom-jspsych@1", params };
+  const snip = c.librarySnippet(entry);
+  const yaml = CUSTOM.replace(/sequence:\n/, "sequence:\n" + snip.split("sequence:\n")[1]).replace("blocks:\n", "blocks:\n  go_nogo: custom-jspsych@1\n");
+  const v = c.validateSpec(yaml);
+  assert.deepEqual(v.errors, []);
+  const claims = c.libraryClaims(v.spec);
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].name, "go-nogo");
+  assert.equal(c.matchesLibrary(v.spec, claims[0].item, entry), true);
+  const edited = c.validateSpec(yaml.replace("n_trials: 20", "n_trials: 40")).spec;
+  assert.equal(c.matchesLibrary(edited, c.libraryClaims(edited)[0].item, entry), false);
+  assert.equal(c.validateSpec(yaml.replace("library: go-nogo@2", "library: Go_NoGo")).ok, false);
+});

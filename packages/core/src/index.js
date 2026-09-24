@@ -21,3 +21,4 @@ export { hashSpec, canonicalJson, shortHash } from "./hash.js";
 export { estimateMinutes } from "./estimate.js";
 export { textToHtml, textToPlain, escapeHtml } from "./text.js";
 export { EXAMPLE_DOTS_YAML, EXAMPLE_FLANKER_YAML, EXAMPLE_CUSTOM_YAML, EXAMPLES } from "./examples.js";
+export { builtinDemoParams, demoSpec, librarySnippet, matchesLibrary, libraryClaims, isCustomRef, LIBRARY_NAME, LIBRARY_REF } from "./library.js";

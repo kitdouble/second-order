@@ -25,6 +25,7 @@ export default async function RootLayout({ children }) {
               <nav>
                 <Link href="/">Studies</Link>
                 <Link href="/studies/new">New study</Link>
+                <Link href="/library">Library</Link>
                 <Link href="/connect">Connect Claude</Link>
                 {user.tier === "lab_head" && <Link href="/people">People</Link>}
                 <Link href="/settings">Settings</Link>

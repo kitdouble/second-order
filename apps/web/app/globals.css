@@ -92,3 +92,4 @@ ul.findings li { border: 1px solid var(--line); border-radius: 6px; padding: 10p
 .kv dd { margin: 0; }
 .hero { max-width: 560px; padding: 40px 0; }
 .copy { user-select: all; word-break: break-all; }
+button { white-space: nowrap; }

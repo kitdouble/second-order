@@ -24,6 +24,7 @@ import { prolificClient } from "@so/core/prolific";
 import { q, one, tx, j } from "./db.js";
 import { audit } from "./audit.js";
 import { newToken, sha256 } from "./tokens.js";
+import { customCodeVetted, libraryWarnings } from "./library.js";
 
 export class ServiceError extends Error {
   constructor(message, status = 400) {
@@ -37,11 +38,11 @@ const fail = (m, status) => {
 
 export const PROLIFIC_FEE = 1 / 3; // academic service fee on top of rewards
 export const TRUSTED_CAP = 200;
-const isLabHead = (a) => a.user.tier === "lab_head";
+export const isLabHead = (a) => a.user.tier === "lab_head";
 
 // ---------------------------------------------------------------- access
 
-async function loadStudy(actor, slug) {
+export async function loadStudy(actor, slug) {
   const s = await one(
     `SELECT s.*, u.name AS owner_name, u.tier AS owner_tier FROM studies s JOIN users u ON u.id = s.owner_id WHERE s.slug = $1`,
     [slug],
@@ -52,7 +53,7 @@ async function loadStudy(actor, slug) {
 
 const canEdit = (actor, s) => isLabHead(actor) || s.owner_id === actor.user.id;
 
-async function versionOf(study, hash) {
+export async function versionOf(study, hash) {
   const h = hash ?? study.current_hash;
   if (!h) fail("This study has no spec yet.");
   const v = await one("SELECT * FROM spec_versions WHERE study_id = $1 AND hash LIKE $2 || '%' ORDER BY created_at DESC LIMIT 1", [
@@ -81,7 +82,7 @@ export async function listStudies(actor) {
             (SELECT count(*) FROM comments c WHERE c.study_id = s.id AND c.status = 'open' AND c.severity IS NOT NULL) AS open_findings,
             (SELECT count(*) FROM reviews r WHERE r.study_id = s.id AND r.status = 'open') AS open_reviews
      FROM studies s JOIN users u ON u.id = s.owner_id
-     WHERE $1 OR s.owner_id = $2 ORDER BY s.updated_at DESC`,
+     WHERE ($1 OR s.owner_id = $2) AND s.slug <> '_library' ORDER BY s.updated_at DESC`,
     [isLabHead(actor), actor.user.id],
   );
   return r.rows;
@@ -101,7 +102,7 @@ export async function search(actor, query) {
   const like = `%${query}%`;
   const studies = await q(
     `SELECT DISTINCT s.slug, s.title, s.status FROM studies s LEFT JOIN spec_versions v ON v.study_id = s.id
-     WHERE ($1 OR s.owner_id = $2) AND (s.title ILIKE $3 OR s.slug ILIKE $3 OR v.yaml ILIKE $3) LIMIT 20`,
+     WHERE ($1 OR s.owner_id = $2) AND s.slug <> '_library' AND (s.title ILIKE $3 OR s.slug ILIKE $3 OR v.yaml ILIKE $3) LIMIT 20`,
     [isLabHead(actor), actor.user.id, like],
   );
   const notes = await q(
@@ -131,6 +132,7 @@ export async function saveSpec(actor, { yaml, message = null, baseHash = null, e
     return { ok: false, saved: false, errors: [{ path: "study.slug", message: `This spec is for "${spec.study.slug}", not "${expectSlug}". Slugs can't change; fork instead.` }] };
   }
   const hash = await hashSpec(spec);
+  v.warnings = await libraryWarnings(spec, v.warnings);
   const validation = { ok: v.ok, errors: v.errors, warnings: v.warnings };
 
   const result = await tx(async (c) => {
@@ -337,8 +339,11 @@ export async function requestReview(actor, slug, summary = null) {
 /** Who may approve this gate for this study? */
 export async function approvalRight(actor, s, spec, gate) {
   if (isLabHead(actor)) return { ok: true };
-  if (spec.sequence.some((it) => getBlock(spec.blocks[it.use])?.custom)) {
-    return { ok: false, reason: "This study runs custom code, so the lab head approves it whatever the tier." };
+  if (spec.sequence.some((it) => getBlock(spec.blocks[it.use])?.custom) && !(await customCodeVetted(spec))) {
+    return {
+      ok: false,
+      reason: "This study runs custom code that isn't an unchanged lab library task, so the lab head approves it whatever the tier.",
+    };
   }
   if (s.owner_id !== actor.user.id) return { ok: false, reason: "Only the lab head can approve other people's studies." };
   if (actor.user.tier !== "trusted") return { ok: false, reason: "Supervised studies need the lab head's approval." };
@@ -840,7 +845,7 @@ export async function personSummary(actor, name = null) {
     : actor.user;
   if (!target) fail(`No person matching "${name}".`, 404);
   if (!isLabHead(actor) && target.id !== actor.user.id) fail("You can only see your own summary.", 403);
-  const studies = (await q("SELECT slug, title, status, status_note, updated_at FROM studies WHERE owner_id = $1 ORDER BY updated_at DESC", [target.id])).rows;
+  const studies = (await q("SELECT slug, title, status, status_note, updated_at FROM studies WHERE owner_id = $1 AND slug <> '_library' ORDER BY updated_at DESC", [target.id])).rows;
   const since = (await one("SELECT max(at) AS at FROM audit_log WHERE action = 'meeting_marked' AND detail->>'person' = $1", [target.id]))?.at ?? null;
   const activity = (
     await q(

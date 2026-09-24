@@ -5,7 +5,7 @@ export const SERVER_INSTRUCTIONS = `Second Order runs online behavioural experim
 A study is a YAML spec (design, blocks, measures, exclusions, analysis). You edit specs; people approve them.
 Before any study work, call get with kind "guide" once, and kind "block_catalog" before writing blocks.
 Workflow: edit_spec (save) -> check qa -> check simulate -> check preview -> review request -> a person approves in the web app -> pilot -> go-live.
-Rules: never guess block parameters (read the catalog); fix validation errors by their path; after saving, run QA; never claim a study is approved or running unless status says so.
+Rules: never guess block parameters (read the catalog; check the lab library before writing custom code); fix validation errors by their path; after saving, run QA; never claim a study is approved or running unless status says so.
 You cannot approve, deploy, resume or close studies: those are human-only and happen in the web app.`;
 
 export function guideText() {
@@ -49,7 +49,11 @@ draft -> in_review -> approved -> piloting -> pilot_review -> live -> (paused) -
 - simulation.truth: threshold {mean, sd} (dots difference giving d' = 1), mratio {mean, sd, by: {factor: {level: value}}}.
 
 ## Tasks that aren't a ready-made block
-Check the catalog first. Then, in this order:
+Check the block catalog and the lab library first (library action "list"). A lab library task is a step someone in the lab
+already built (often custom code the lab head has vetted): library action "get" gives YAML to paste. Keep its library and
+params fields unchanged so it stays vetted; change params only if needed, and say that it then needs lab head approval.
+library action "try" gives a link that runs one block or lab task on its own; offer it so the person can feel the task.
+If nothing fits, in this order:
 1. choice-rt@1 covers most speeded choice tasks: flanker, Stroop, Simon, lexical decision, categorisation, go/no-go
    with 2+ keys, anything that is "show a text/symbol stimulus, press one of 2 to 6 keys". Stimuli are a list of
    {id, text, color, position, type, correct, weight}; type is your label for filtering (congruent, incongruent, word...).
@@ -69,8 +73,9 @@ Check the catalog first. Then, in this order:
      use placeholder rows, so there is no power analysis. Tell the person to click through the preview themselves.
    - Any study with custom code needs the lab head's approval, whatever the person's tier. Say so up front.
    See example_spec name "custom".
-If a custom task will be reused across studies, suggest the lab turns it into a proper block (CLAUDE.md in the repo
-explains how); don't copy custom code between studies silently.
+If a custom task would be useful to others, suggest the lab head adds it to the library (library action "add", lab head
+only). Tasks used by several studies are worth turning into a verified block (CLAUDE.md in the repo explains how).
+Don't copy custom code between studies silently; use the library so its origin is recorded.
 
 ## Reviewing (if you are the Lab Reviewer)
 review action "next_task" returns a task with instructions, spec, QA and simulation. Follow the task's

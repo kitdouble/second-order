@@ -66,6 +66,11 @@ export const specSchema = z.strictObject({
       z.strictObject({
         use: ident,
         id: ident.optional(),
+        library: z
+          .string()
+          .regex(/^[a-z][a-z0-9-]{1,39}@\d+$/, 'Library references look like "go-nogo@1".')
+          .optional()
+          .describe("Set when the step was copied from the lab library (name@version). Leave params unchanged to keep it vetted."),
         params: z.record(z.string(), z.any()).default({}),
       }),
     )

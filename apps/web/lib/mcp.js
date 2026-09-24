@@ -5,6 +5,7 @@ import * as S from "./studies.js";
 import * as P from "./prolific-tools.js";
 import { SERVER_INSTRUCTIONS, guideText } from "./guide.js";
 import { EXAMPLES } from "@so/core";
+import * as L from "./library.js";
 
 const PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "0.1.0";
@@ -213,6 +214,31 @@ export const TOOLS = [
     annotations: RW,
   },
   {
+    name: "library",
+    title: "Lab library",
+    description:
+      "The lab's reusable tasks: built-in blocks plus tasks the lab head has added from studies (a block with its params, often custom code). " +
+      "action list: everything available. action get: one lab task in full with YAML to paste into a spec (name, e.g. \"go-nogo\" or \"go-nogo@2\"). " +
+      "action try: a link that runs one block or lab task on its own (target: a block ref like \"choice-rt@1\" or a lab task name); give it to the person. " +
+      "action add (lab head only): add a step from a study (study, step, name, optional title/description). action retire (lab head only): name. " +
+      "Check the library before writing custom code. Unchanged lab tasks count as vetted code.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: str("list, get, try, add or retire.", { enum: ["list", "get", "try", "add", "retire"] }),
+        name: str("Lab task name (get, add, retire), e.g. go-nogo or go-nogo@2."),
+        target: str("For try: a block ref (choice-rt@1) or lab task name."),
+        study: str("For add: study slug."),
+        step: str("For add: step id in that study."),
+        title: str("For add: short title."),
+        description: str("For add: what the task is, for students choosing it."),
+        hash: str("For add: version hash (default current)."),
+      },
+      required: ["action"],
+    },
+    annotations: RW,
+  },
+  {
     name: "prolific",
     title: "Prolific",
     description:
@@ -251,8 +277,14 @@ async function call(name, a, actor, base) {
       switch (a.kind) {
         case "guide":
           return { guide: guideText() };
-        case "block_catalog":
-          return { blocks: S.catalog() };
+        case "block_catalog": {
+          const lib = await L.listLibrary();
+          return {
+            blocks: S.catalog(),
+            lab_library: lib.lab.map(({ ref, title, description, block, verified, used_by_studies }) => ({ ref, title, description, block, verified, used_by_studies })),
+            note: 'lab_library entries are ready-made steps; use the library tool (action "get") for the YAML to paste.',
+          };
+        }
         case "example_spec": {
           const ex = EXAMPLES[a.name ?? "dots"];
           if (!ex) throw new S.ServiceError(`No example "${a.name}". Examples: ${Object.keys(EXAMPLES).join(", ")}.`);
@@ -336,6 +368,26 @@ async function call(name, a, actor, base) {
     case "save":
       need(a, "study", "kind", "content");
       return S.saveItem(actor, a.study, a);
+    case "library":
+      need(a, "action");
+      if (a.action === "list") return L.listLibrary();
+      if (a.action === "get") {
+        need(a, "name");
+        return L.getLibraryEntry(a.name);
+      }
+      if (a.action === "try") {
+        need(a, "target");
+        return L.tryLink(actor, a.target, base);
+      }
+      if (a.action === "add") {
+        need(a, "study", "step", "name");
+        return L.addToLibrary(actor, a);
+      }
+      if (a.action === "retire") {
+        need(a, "name");
+        return L.retireFromLibrary(actor, a.name);
+      }
+      throw new S.ServiceError("Unknown library action. Use list, get, try, add or retire.");
     case "prolific":
       need(a, "study", "action");
       if (actor.user.tier === "supervised") throw new S.ServiceError("Not available to supervised accounts.", 403);

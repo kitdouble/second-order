@@ -245,6 +245,24 @@ CREATE TABLE IF NOT EXISTS audit_log (
   detail    JSONB
 );
 CREATE INDEX IF NOT EXISTS audit_study ON audit_log (study_id, at DESC);
+
+-- The lab library: ready-made steps (block + params) anyone in the lab can use.
+-- Versions are immutable; adding the same name again makes a new version.
+CREATE TABLE IF NOT EXISTS library_entries (
+  name          TEXT NOT NULL,
+  version       INTEGER NOT NULL,
+  title         TEXT NOT NULL,
+  description   TEXT NOT NULL,
+  block_ref     TEXT NOT NULL,
+  params        JSONB NOT NULL,
+  source_study  TEXT,
+  source_hash   TEXT,
+  source_step   TEXT,
+  added_by      UUID REFERENCES users(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  retired_at    TIMESTAMPTZ,
+  PRIMARY KEY (name, version)
+);
 `;
 
 const done = new WeakMap();

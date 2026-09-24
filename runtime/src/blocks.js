@@ -356,8 +356,8 @@ function customCode(step, ctx) {
         frame.srcdoc =
           `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
           `<meta http-equiv="Content-Security-Policy" content="${csp}">` +
-          `<link rel="stylesheet" href="${origin}/runtime/v1/runtime.css"></head>` +
-          `<body><div id="so-root"></div><script src="${origin}/runtime/v1/sandbox.js"></script></body></html>`;
+          `<link rel="stylesheet" href="${origin}${__CSS_URL__}"></head>` +
+          `<body><div id="so-root"></div><script src="${origin}${__SANDBOX_URL__}"></script></body></html>`;
         let rows = 0;
         let ended = false;
         const finish = () => {

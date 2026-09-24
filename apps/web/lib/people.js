@@ -12,7 +12,7 @@ export async function listPeople(actor) {
   requireHead(actor);
   return (
     await q(
-      `SELECT u.*, (SELECT count(*) FROM studies s WHERE s.owner_id = u.id) AS studies,
+      `SELECT u.*, (SELECT count(*) FROM studies s WHERE s.owner_id = u.id AND s.slug <> '_library') AS studies,
               (SELECT max(created_at) FROM web_sessions w WHERE w.user_id = u.id) AS last_sign_in
        FROM users u ORDER BY u.disabled, u.created_at`,
     )

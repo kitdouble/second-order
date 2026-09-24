@@ -236,3 +236,23 @@ export async function signOutAction() {
   jar.delete(COOKIE);
   redirect("/");
 }
+
+// ---- library
+
+export async function tryTaskAction(fd) {
+  const actor = await requireActor();
+  await run("/library", async () => {
+    const L = await import("@/lib/library");
+    const r = await L.tryLink(actor, f(fd, "target"), await base());
+    return r.link;
+  });
+}
+
+export async function retireTaskAction(fd) {
+  const actor = await requireActor();
+  await run("/library", async () => {
+    const L = await import("@/lib/library");
+    const r = await L.retireFromLibrary(actor, f(fd, "name"));
+    return { message: `Retired ${r.retired.join(", ")}. ${r.note}` };
+  });
+}
