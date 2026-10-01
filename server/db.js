@@ -177,6 +177,11 @@ function addColumn(table, column, definition) {
 }
 addColumn('runs', 'stopped', 'TEXT'); // why a block ended the run early, e.g. "device"
 addColumn('study_versions', 'stimuli', "TEXT NOT NULL DEFAULT '{}'"); // JSON {name: sha256} fixed at save
+// Dashboard bundle, built on first view and rebuilt when the dashboard code (package version) changes.
+addColumn('study_versions', 'dash_js', 'TEXT');
+addColumn('study_versions', 'dash_css', 'TEXT');
+addColumn('study_versions', 'dash_hash', 'TEXT');
+addColumn('study_versions', 'dash_build', 'TEXT');
 
 export const now = () => Date.now();
 export const DAY = 24 * 60 * 60 * 1000;

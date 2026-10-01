@@ -3,7 +3,8 @@
 import express from 'express';
 import { join } from 'node:path';
 import { db, hash, newId, newToken, now } from './db.js';
-import { FILES_DIR, MIME } from './stimuli.js';
+import { FILES_DIR, MIME, fileUrl } from './stimuli.js';
+import { compileDashboard, RUNTIME_VERSION } from './compile.js';
 
 const MAX_TRIAL_BYTES = 5 * 1024 * 1024; // audio/video/sketchpad responses can be large
 const MAX_RUN_BYTES = 100 * 1024 * 1024;
@@ -57,7 +58,7 @@ runApp.get('/s/:token', (req, res) => {
     <script defer src="${asset}.js"></script>`));
 });
 
-function page(body, head = '') {
+function page(body, head = '', title = 'Research study') {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -65,13 +66,57 @@ function page(body, head = '') {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
   <meta name="color-scheme" content="light">
-  <title>Research study</title>${head}
+  <title>${title}</title>${head}
 </head>
 <body style="margin:0;background:#fff;color:#000">
   <div id="jspsych-target">${body ? `<div style="max-width:560px;margin:20vh auto 0;padding:0 16px;font:18px/1.5 system-ui,sans-serif;text-align:center">${body}</div>` : ''}</div>
 </body>
 </html>`;
 }
+
+// The researcher dashboard for a version, reached with the version's preview token. It may be framed
+// (Claude and ChatGPT show it inside the chat); it changes nothing and saves nothing.
+runApp.get('/d/:token', async (req, res) => {
+  res.set('Content-Security-Policy', CSP.replace("frame-ancestors 'none'", 'frame-ancestors *'));
+  const row = db.prepare(
+    `SELECT v.*, s.title FROM links l JOIN study_versions v ON v.id = l.version_id JOIN studies s ON s.id = v.study_id
+     WHERE l.token = ? AND l.kind = 'preview'`
+  ).get(req.params.token);
+  if (!row) return res.status(404).type('html').send(page('<p>This dashboard link is not valid.</p>'));
+
+  let { dash_hash: hash } = row;
+  if (!row.dash_js || row.dash_build !== RUNTIME_VERSION) {
+    const stimuli = JSON.parse(row.stimuli);
+    const manifest = Object.fromEntries(Object.entries(stimuli).map(([name, sha]) => [name, fileUrl(name, sha)]));
+    try {
+      const built = await compileDashboard(row.code, manifest);
+      db.prepare('UPDATE study_versions SET dash_js = ?, dash_css = ?, dash_hash = ?, dash_build = ? WHERE id = ?')
+        .run(built.js, built.css, built.hash, RUNTIME_VERSION, row.id);
+      hash = built.hash;
+    } catch (err) {
+      return res.status(500).type('html').send(page(`<p>The dashboard could not be built: ${String(err.message).replace(/[<&]/g, '')}</p>`));
+    }
+  }
+
+  const config = JSON.stringify({
+    title: row.title, version: row.number, notes: row.notes, packages: JSON.parse(row.packages), stimuli: Object.keys(JSON.parse(row.stimuli)),
+  }).replace(/</g, '\\u003c');
+  const asset = `/dv/${row.id}.${hash}`;
+  res.type('html').send(page('', `
+    <link rel="stylesheet" href="${asset}.css">
+    <script type="application/json" id="so-config">${config}</script>
+    <script defer src="${asset}.js"></script>`, 'Dashboard'));
+});
+
+runApp.get('/dv/:file', (req, res) => {
+  const m = req.params.file.match(/^([0-9a-f-]{36})\.([0-9a-f]{16})\.(js|css)$/);
+  if (!m) return res.sendStatus(404);
+  const v = db.prepare('SELECT dash_js, dash_css, dash_hash FROM study_versions WHERE id = ?').get(m[1]);
+  if (!v || v.dash_hash !== m[2]) return res.sendStatus(404);
+  res.set('Cache-Control', 'public, max-age=31536000, immutable')
+    .type(m[3] === 'js' ? 'application/javascript' : 'text/css')
+    .send(m[3] === 'js' ? v.dash_js : v.dash_css);
+});
 
 // Bundles are immutable per version, so they cache forever.
 runApp.get('/v/:file', (req, res) => {

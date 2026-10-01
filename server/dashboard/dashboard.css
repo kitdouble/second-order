@@ -1,0 +1,267 @@
+/* Experiment dashboard, in Second Order's (MetaForge's) look: white, black, Inter, uppercase labels. */
+.db-page {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+  font: 15px/1.45 'Inter', system-ui, -apple-system, sans-serif;
+  color: #000;
+  text-align: left;
+}
+
+.db-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.db-brand {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.db-brand span {
+  margin-left: 0.6rem;
+  font-weight: 400;
+  color: #5f6368;
+}
+
+.db-title h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.db-meta {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: #5f6368;
+}
+
+.db-page h2 {
+  margin: 1.5rem 0 0.25rem;
+  font-size: 1.15rem;
+}
+
+.db-switch {
+  display: inline-flex;
+  border: 1px solid #000;
+}
+
+.db-switch a {
+  padding: 0.45rem 0.9rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #000;
+  text-decoration: none;
+}
+
+.db-switch a + a {
+  border-left: 1px solid #000;
+}
+
+.db-switch a.active {
+  background: #000;
+  color: #fff;
+}
+
+.db-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  margin: 1.25rem 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+  color: #5f6368;
+}
+
+.db-summary strong {
+  margin-right: 0.35rem;
+  color: #000;
+}
+
+.db-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  font-size: 0.8rem;
+  color: #5f6368;
+}
+
+.db-page button,
+.db-runbar button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid #000;
+  background: #fff;
+  color: #000;
+  font: 500 0.72rem/1 'Inter', system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.db-page button:hover,
+.db-runbar button:hover {
+  background: #f5f5f5;
+}
+
+.db-page button.db-primary {
+  background: #000;
+  color: #fff;
+}
+
+.db-page button.db-primary:hover {
+  background: #333;
+}
+
+.db-warning {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid #d93025;
+  background: #fdf3f2;
+  font-size: 0.9rem;
+}
+
+.db-warning p {
+  margin: 0.25rem 0;
+}
+
+/* Timeline */
+.db-timeline,
+.db-timeline ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.db-timeline {
+  border-top: 1px solid #e0e0e0;
+}
+
+.db-timeline ol {
+  padding-left: 1.75rem;
+}
+
+.db-row {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.db-number {
+  min-width: 2.5rem;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  color: #5f6368;
+}
+
+.db-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.db-block > .db-row .db-label {
+  font-weight: 600;
+}
+
+.db-label small {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #80868b;
+}
+
+.db-actions {
+  display: flex;
+  gap: 0.4rem;
+  opacity: 0.35;
+  transition: opacity 0.15s;
+}
+
+.db-row:hover .db-actions,
+.db-actions:focus-within {
+  opacity: 1;
+}
+
+/* Running */
+.db-runbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  height: 44px;
+  padding: 0 0.75rem;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fff;
+  font: 0.8rem/1.2 'Inter', system-ui, sans-serif;
+}
+
+.db-runbar span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #5f6368;
+}
+
+.db-runbar strong {
+  color: #000;
+}
+
+.db-stage {
+  min-height: calc(100vh - 45px);
+}
+
+/* Results */
+.db-table {
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid #e0e0e0;
+}
+
+.db-table table {
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.db-table th,
+.db-table td {
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid #eee;
+  text-align: left;
+}
+
+.db-table th {
+  position: sticky;
+  top: 0;
+  background: #fafafa;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .db-row {
+    flex-wrap: wrap;
+  }
+
+  .db-actions {
+    opacity: 1;
+    width: 100%;
+    padding-left: 3.4rem;
+  }
+}

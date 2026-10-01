@@ -129,3 +129,23 @@ export async function compileSimulation(code, manifest = {}) {
     throw new CompileError((err.errors ?? [{ text: err.message }]).map(format));
   }
 }
+
+// The researcher dashboard for a version (server/dashboard/): same experiment, stimuli and packages.
+export async function compileDashboard(code, manifest = {}) {
+  try {
+    const result = await build({
+      stdin: { contents: "import './server/dashboard/entry.js';", resolveDir: root, loader: 'js' },
+      bundle: true, write: false, minify: true, format: 'iife', target: ['es2020'], outdir: 'out', entryNames: 'dash',
+      logLevel: 'silent', legalComments: 'none',
+      loader: { '.woff': 'dataurl', '.woff2': 'dataurl', '.svg': 'dataurl', '.png': 'dataurl' },
+      plugins: [experimentPlugin(code, manifest)],
+    });
+    const js = result.outputFiles.find((f) => f.path.endsWith('.js'))?.text ?? '';
+    const css = result.outputFiles.find((f) => f.path.endsWith('.css'))?.text ?? '';
+    return { js, css, hash: createHash('sha256').update(js).update(css).digest('hex').slice(0, 16) };
+  } catch (err) {
+    throw new CompileError((err.errors ?? [{ text: err.message }]).map(format));
+  }
+}
+
+export const RUNTIME_VERSION = ourPackage.version;

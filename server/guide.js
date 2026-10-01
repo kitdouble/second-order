@@ -95,7 +95,10 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
 1. create_study (once), then save_version with the full module. Every save is a new, immutable version.
 2. simulate the new version (a few participants) and fix any errors or unexpected data before going on.
    Check value_counts: conditions balanced, data columns the analysis needs present.
-3. Give the researcher the preview_url to try. Preview data is stored as test data.
+3. show_dashboard so the researcher can try it (in the chat where supported; always also give the
+   dashboard_url). The dashboard lists the timeline and runs all of it, from any item or only one item,
+   showing the data at the end; it saves nothing. preview_url is the full participant experience and saves
+   test data.
 4. When they are happy, create_participant_link for that exact version (Prolific needs the completion URL
    from Prolific). That version is what participants get, even after later saves.
 5. get_data returns the trial rows as CSV (test data excluded unless include_test is true).

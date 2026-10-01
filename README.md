@@ -21,6 +21,7 @@ shows the connector URL.
 | `create_study` | everyone | new empty study |
 | `save_version` | owner, admin | compile and save a new immutable version; returns its preview link |
 | `simulate` | owner, admin | run simulated participants (sandboxed) and summarise their data |
+| `show_dashboard` | owner, admin | the version's dashboard, inside the chat (MCP App) or as a link |
 | `list_stimuli` / `remove_stimulus` | owner, admin | the study's stimulus files |
 | `create_upload_link` | owner, admin | one-hour page for dragging in stimulus files |
 | `add_stimulus` / `import_stimulus_from_url` | owner, admin | add generated or public files |
@@ -45,6 +46,11 @@ saved with, so replacing a file never changes a saved version.
 `simulate` runs jsPsych's data-only simulation in jsdom, one participant per child process under Node's
 permission model (`server/sim/`). In production those processes belong to the `second-order-sim` service:
 no network, no database, read-only filesystem, memory-capped, reached over a unix socket (`SIM_SOCKET`).
+
+Each version has a dashboard (`run.2ndorder.live/d/<preview token>`, `server/dashboard/`), ported from the
+kit's: the timeline, run all / from an item / only an item, recruitment switch, data with downloads; nothing
+is saved. `show_dashboard` is an MCP App (`server/mcp-app.js`, protocol 2026-01-26, hand-written bridge) that
+embeds it in Claude or ChatGPT; downloads go through the host (`ui/download-file`).
 
 Participants use a separate origin (`RUN_ORIGIN`, `run.2ndorder.live`) served by `server/run.js`, with a
 strict CSP (data can only go back to Second Order). `server/runtime/client.js` wraps every experiment: it

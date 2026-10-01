@@ -20,6 +20,8 @@ export function linkUrl(link) {
   return base;
 }
 
+export const dashboardUrl = (previewToken) => `${config.runOrigin}/d/${previewToken}`;
+
 /* ---------- Studies ---------- */
 
 export function createStudy(user, { title, description }) {
@@ -77,6 +79,7 @@ export function describeStudy(user, studyId, versionNumber) {
   const study = findStudy(user, studyId);
   const versions = db.prepare('SELECT id, number, notes, created_at FROM study_versions WHERE study_id = ? ORDER BY number').all(study.id);
   const shown = versions.length ? findVersion(study, versionNumber) : null;
+  const previewLink = shown && db.prepare("SELECT * FROM links WHERE version_id = ? AND kind = 'preview'").get(shown.id);
   const links = db.prepare("SELECT * FROM links WHERE study_id = ? AND kind = 'live' ORDER BY created_at").all(study.id);
   return {
     id: study.id,
@@ -87,7 +90,8 @@ export function describeStudy(user, studyId, versionNumber) {
     participant_links: links.map((l) => linkSummary(l)),
     ...(shown && {
       version: shown.number,
-      preview_url: linkUrl(db.prepare("SELECT * FROM links WHERE version_id = ? AND kind = 'preview'").get(shown.id)),
+      preview_url: linkUrl(previewLink),
+      dashboard_url: dashboardUrl(previewLink.token),
       packages: JSON.parse(shown.packages),
       stimuli: Object.keys(JSON.parse(shown.stimuli)),
       code: shown.code,
@@ -126,6 +130,7 @@ export async function saveVersion(user, studyId, { code, notes }) {
   return {
     version: number,
     preview_url: linkUrl({ token: previewToken, recruitment: 'none' }),
+    dashboard_url: dashboardUrl(previewToken),
     packages: compiled.packages,
     stimuli: Object.keys(stimuli).length,
     warnings: compiled.warnings,

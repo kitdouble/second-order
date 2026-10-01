@@ -11,6 +11,7 @@ import { CompileError } from './compile.js';
 import { authoringGuide } from './guide.js';
 import { addStimulus, createUploadLink, importFromUrl, listStimuli, removeStimulus } from './stimuli.js';
 import { simulate } from './simulate.js';
+import { DASHBOARD_APP_URI, MCP_APP_MIME, dashboardAppHtml, dashboardAppMeta } from './mcp-app.js';
 
 const text = (value) => ({
   content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
@@ -194,6 +195,38 @@ function buildServer() {
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, handled(async ({ study_id, ...args }, extra) => text(await simulate(userOf(extra), study_id, args))));
+
+  // An MCP App: hosts that support it (Claude, ChatGPT) show the dashboard inside the conversation.
+  server.registerResource('dashboard-app', DASHBOARD_APP_URI, {
+    title: 'Experiment dashboard',
+    description: 'In-chat view of a study version\'s dashboard',
+    mimeType: MCP_APP_MIME,
+    _meta: dashboardAppMeta,
+  }, async () => ({
+    contents: [{ uri: DASHBOARD_APP_URI, mimeType: MCP_APP_MIME, text: dashboardAppHtml, _meta: dashboardAppMeta }],
+  }));
+
+  server.registerTool('show_dashboard', {
+    title: 'Show dashboard',
+    description:
+      'Show the researcher the dashboard for a version, inside the chat where supported: the timeline, running all of it, from any ' +
+      'item or only one item, and the recorded data with downloads. Dashboard runs save nothing. Use after save_version + simulate ' +
+      'so the researcher can try the study; also give them the dashboard_url in case the panel does not appear.',
+    inputSchema: {
+      study_id: z.string(),
+      version: z.number().int().positive().optional().describe('Defaults to the latest'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    _meta: { ui: { resourceUri: DASHBOARD_APP_URI }, 'ui/resourceUri': DASHBOARD_APP_URI, 'openai/outputTemplate': DASHBOARD_APP_URI },
+  }, handled(async ({ study_id, version }, extra) => {
+    const study = describeStudy(userOf(extra), study_id, version);
+    if (!study.version) throw new StudyError('This study has no versions yet. Save one with save_version.');
+    const structured = { title: study.title, version: study.version, dashboard_url: study.dashboard_url, preview_url: study.preview_url };
+    return {
+      content: [{ type: 'text', text: `Dashboard for ${study.title}, version ${study.version}: ${study.dashboard_url}\nFull participant preview (saves test data): ${study.preview_url}` }],
+      structuredContent: structured,
+    };
+  }));
 
   /* ---------- Stimuli ---------- */
 
