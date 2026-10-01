@@ -1,7 +1,5 @@
 **/node_modules
-**/.next
+dist
+data
 .git
-hosting
-scripts
-**/test
-*.zip
+.env

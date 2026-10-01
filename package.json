@@ -1,0 +1,31 @@
+{
+  "name": "second-order",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"node --watch --disable-warning=ExperimentalWarning --env-file-if-exists=.env server/index.js\" \"vite\"",
+    "build": "vite build",
+    "start": "NODE_ENV=production node --disable-warning=ExperimentalWarning --env-file-if-exists=.env server/index.js",
+    "invite": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/invite.js",
+    "deploy": "scripts/deploy.sh",
+    "invite:prod": "scripts/invite-prod.sh"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.0.3",
+    "express": "^5.2.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "vite": "^8.3.1"
+  }
+}
