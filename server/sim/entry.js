@@ -2,6 +2,7 @@
 // worker (sim/worker.js). Mirrors runtime/client.js minus saving and redirects.
 import { initJsPsych } from 'jspsych';
 import { setContext } from '../lib/context.js';
+import { nameStimulus } from '../lib/stimuli.js';
 import * as experiment from 'second-order:experiment';
 
 const sim = window.__SO_SIM__;
@@ -57,5 +58,5 @@ window.__soSimulation = (async () => {
   setContext(context);
   const timeline = await experiment.default(jsPsych, context);
   await jsPsych.simulate(timeline, 'data-only', sim.simulationOptions ?? {});
-  return jsPsych.data.get().values();
+  return jsPsych.data.get().values().map(nameStimulus);
 })();

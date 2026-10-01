@@ -38,18 +38,34 @@ const exclusive = (fn) => {
 const cell = (v) => (v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
 const csvCell = (v) => { const s = cell(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 
+// Columns from jsPsych and the standard blocks that rarely matter when checking a design.
+const TECHNICAL = new Set([
+  'width', 'height', 'browser', 'browser_version', 'mobile', 'os', 'fullscreen', 'device_type', 'device_allowed',
+  'consent_form', 'debrief_form', 'plugin_version', 'success', 'timeout', 'failed_files', 'load_time_ms',
+  'rt_key_duration', 'internal_node_id', 'trial_type',
+]);
+const NEVER = new Set(['time_elapsed', 'rt', 'trial_index', 'stimulus', 'response']); // stimulus_name is kept
+
+// Value counts per column. A column that has one value per participant (a condition, a counterbalancing
+// group) is counted in participants, which is what matters for balance; anything else in rows.
 function summarise(runs) {
-  const rows = runs.flatMap((r) => r.rows ?? []);
+  const people = runs.map((r) => r.rows ?? []).filter((rows) => rows.length);
+  const rows = people.flat();
   const columns = [...new Set(rows.flatMap(Object.keys))];
-  const skip = new Set(['time_elapsed', 'rt', 'trial_index', 'stimulus', 'plugin_version', 'response']);
-  const values = {};
+  const design = {};
+  const technical = {};
   for (const c of columns) {
-    if (skip.has(c)) continue;
+    if (NEVER.has(c)) continue;
+    const perPerson = people.map((p) => new Set(p.filter((row) => c in row).map((row) => cell(row[c]))));
+    const constant = perPerson.every((values) => values.size === 1);
     const counts = new Map();
-    for (const row of rows) if (c in row) counts.set(cell(row[c]), (counts.get(cell(row[c])) ?? 0) + 1);
-    if (counts.size > 0 && counts.size <= 12) values[c] = Object.fromEntries([...counts].sort((a, b) => b[1] - a[1]));
+    if (constant) for (const values of perPerson) { const [v] = values; counts.set(v, (counts.get(v) ?? 0) + 1); }
+    else for (const row of rows) if (c in row) counts.set(cell(row[c]), (counts.get(cell(row[c])) ?? 0) + 1);
+    if (counts.size === 0 || counts.size > 12) continue;
+    const entry = { unit: constant ? 'participants' : 'rows', counts: Object.fromEntries([...counts].sort((a, b) => b[1] - a[1])) };
+    (TECHNICAL.has(c) ? technical : design)[c] = entry;
   }
-  return { columns, values };
+  return { columns, design, technical };
 }
 
 export async function simulate(user, studyId, { version, participants = 3, recruitment = 'prolific', simulation_options = {} } = {}) {
@@ -71,7 +87,7 @@ export async function simulate(user, studyId, { version, participants = 3, recru
       runs.push({ ...result, ms: Date.now() - t });
     }
 
-    const { columns, values } = summarise(runs);
+    const { columns, design, technical } = summarise(runs);
     const first = runs.find((r) => r.rows?.length)?.rows ?? [];
     const firstColumns = [...new Set(first.flatMap(Object.keys))];
     const sample = [firstColumns.join(','), ...first.slice(0, 150).map((r) => firstColumns.map((c) => csvCell(r[c])).join(','))].join('\n');
@@ -89,7 +105,8 @@ export async function simulate(user, studyId, { version, participants = 3, recru
         seconds: Math.round(r.ms / 100) / 10,
       })),
       columns,
-      value_counts: values,
+      value_counts: design,
+      technical_value_counts: technical,
       first_participant_csv: sample + (first.length > 150 ? `\n… ${first.length - 150} more rows` : ''),
       seconds: Math.round((Date.now() - started) / 100) / 10,
       ...(runs.some((r) => r.standIns?.length) && {

@@ -136,7 +136,7 @@ runApp.get('/f/:file', (req, res) => {
   res.set({
     'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'",
     'X-Content-Type-Options': 'nosniff',
-    'Cross-Origin-Resource-Policy': 'same-origin',
+    'Cross-Origin-Resource-Policy': 'cross-origin', // the chat panel shows thumbnails
   });
   // Cache headers only travel with the file itself, never with an error.
   const headers = { 'Content-Type': MIME[m[2]], 'Cache-Control': 'public, max-age=31536000, immutable' };

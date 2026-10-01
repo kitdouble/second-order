@@ -6,12 +6,12 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createInvite, db } from './db.js';
 import { config } from './config.js';
 import { requireMcpAuth } from './oauth.js';
-import { closeLink, createLink, createStudy, describeStudy, exportData, listStudies, saveVersion, StudyError } from './studies.js';
+import { closeLink, createLink, createStudy, describeStudy, exportData, listStudies, panelState, saveVersion, StudyError } from './studies.js';
 import { CompileError } from './compile.js';
 import { authoringGuide } from './guide.js';
 import { addStimulus, createUploadLink, importFromUrl, listStimuli, removeStimulus } from './stimuli.js';
 import { simulate } from './simulate.js';
-import { DASHBOARD_APP_URI, MCP_APP_MIME, dashboardAppHtml, dashboardAppMeta } from './mcp-app.js';
+import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
 const text = (value) => ({
   content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
@@ -185,7 +185,8 @@ function buildServer() {
     description:
       'Run simulated participants through a saved version (jsPsych data-only simulation in a sandboxed simulated browser) and ' +
       'summarise the data: per-participant success/errors, columns, value counts (e.g. to check conditions and counterbalancing) and the ' +
-      'first participant\'s rows. Use after every save_version, before giving the researcher the preview link. Nothing is saved.',
+      'first participant\'s rows. Use after every save_version, before showing the researcher the dashboard. Nothing is saved. ' +
+      'Where supported, the researcher sees the results as a panel in the chat.',
     inputSchema: {
       study_id: z.string(),
       version: z.number().int().positive().optional().describe('Defaults to the latest'),
@@ -194,37 +195,41 @@ function buildServer() {
       simulation_options: z.record(z.string(), z.any()).optional().describe('Passed to jsPsych.simulate, e.g. {"default": {"data": {"rt": 600}}}'),
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
-  }, handled(async ({ study_id, ...args }, extra) => text(await simulate(userOf(extra), study_id, args))));
-
-  // An MCP App: hosts that support it (Claude, ChatGPT) show the dashboard inside the conversation.
-  server.registerResource('dashboard-app', DASHBOARD_APP_URI, {
-    title: 'Experiment dashboard',
-    description: 'In-chat view of a study version\'s dashboard',
-    mimeType: MCP_APP_MIME,
-    _meta: dashboardAppMeta,
-  }, async () => ({
-    contents: [{ uri: DASHBOARD_APP_URI, mimeType: MCP_APP_MIME, text: dashboardAppHtml, _meta: dashboardAppMeta }],
+    _meta: panelToolMeta,
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const simulation = await simulate(userOf(extra), study_id, args);
+    return {
+      ...text(simulation),
+      structuredContent: { view: 'simulation', simulation, study: panelState(userOf(extra), study_id, simulation.version) },
+    };
   }));
+
+  // The in-chat panel (an MCP App): hosts that support it (Claude, ChatGPT) show it in the conversation.
+  server.registerResource('panel', PANEL_URI, {
+    title: 'Second Order panel',
+    description: 'In-chat dashboard, study overview and simulation results',
+    mimeType: MCP_APP_MIME,
+    _meta: panelMeta,
+  }, async () => ({ contents: [{ uri: PANEL_URI, mimeType: MCP_APP_MIME, text: panelHtml, _meta: panelMeta }] }));
 
   server.registerTool('show_dashboard', {
     title: 'Show dashboard',
     description:
-      'Show the researcher the dashboard for a version, inside the chat where supported: the timeline, running all of it, from any ' +
-      'item or only one item, and the recorded data with downloads. Dashboard runs save nothing. Use after save_version + simulate ' +
-      'so the researcher can try the study; also give them the dashboard_url in case the panel does not appear.',
+      'Show the researcher a version inside the chat where supported: its dashboard (timeline; run all, from any item or only one item; ' +
+      'the recorded data with downloads; runs save nothing), the study\'s participant links and counts, versions and stimuli. ' +
+      'The researcher can send feedback to the chat from it. Use after save_version + simulate. Always also give the dashboard_url, ' +
+      'in case the panel does not appear.',
     inputSchema: {
       study_id: z.string(),
       version: z.number().int().positive().optional().describe('Defaults to the latest'),
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
-    _meta: { ui: { resourceUri: DASHBOARD_APP_URI }, 'ui/resourceUri': DASHBOARD_APP_URI, 'openai/outputTemplate': DASHBOARD_APP_URI },
+    _meta: panelToolMeta,
   }, handled(async ({ study_id, version }, extra) => {
-    const study = describeStudy(userOf(extra), study_id, version);
-    if (!study.version) throw new StudyError('This study has no versions yet. Save one with save_version.');
-    const structured = { title: study.title, version: study.version, dashboard_url: study.dashboard_url, preview_url: study.preview_url };
+    const study = panelState(userOf(extra), study_id, version);
     return {
       content: [{ type: 'text', text: `Dashboard for ${study.title}, version ${study.version}: ${study.dashboard_url}\nFull participant preview (saves test data): ${study.preview_url}` }],
-      structuredContent: structured,
+      structuredContent: { view: 'dashboard', study },
     };
   }));
 

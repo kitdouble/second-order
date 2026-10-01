@@ -3,6 +3,7 @@
 import { initJsPsych } from 'jspsych';
 import { setContext } from '../lib/context.js';
 import { exitFullscreen } from '../lib/blocks/device.js';
+import { nameStimulus } from '../lib/stimuli.js';
 
 const config = JSON.parse(document.getElementById('so-config').textContent);
 const query = new URLSearchParams(location.search);
@@ -71,7 +72,7 @@ export async function start(experiment) {
     ...options,
     display_element: 'jspsych-target',
     on_data_update(data) {
-      save(data);
+      save(nameStimulus(data));
       options.on_data_update?.(data);
     },
     async on_finish(data) {

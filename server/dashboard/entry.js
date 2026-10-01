@@ -10,6 +10,7 @@ import { initJsPsych } from 'jspsych';
 import * as experiment from 'second-order:experiment';
 import { setContext } from '../lib/context.js';
 import { exitFullscreen } from '../lib/blocks/device.js';
+import { nameStimulus } from '../lib/stimuli.js';
 import { stopMessage } from '../lib/blocks/stop.js';
 import { describeTimeline, findItem, formatPath, labelsAlong, parsePath, sliceFrom, sliceOnly } from './timeline.js';
 
@@ -22,6 +23,45 @@ setContext(context);
 
 const root = document.getElementById('jspsych-target');
 const embedded = window.parent !== window;
+
+// Inside Second Order's chat panel: the panel says whether notes can be sent to the chat.
+const toPanel = (message) => embedded && window.parent.postMessage(message, '*');
+window.addEventListener('message', (event) => {
+  if (event.source === window.parent && event.data?.type === 'second-order:embed') {
+    document.body.classList.toggle('db-feedback', Boolean(event.data.feedback));
+  }
+});
+
+// A small "note to Claude" form; shown only in a chat that accepts messages.
+function noteForm(item, placeholder = 'What should change?') {
+  const input = el('input', { type: 'text', placeholder, 'aria-label': `Note on ${item}` });
+  const sent = el('span', { class: 'db-sent' });
+  return el('form', {
+    class: 'db-note',
+    onsubmit: (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      toPanel({ type: 'second-order:feedback', item, text });
+      input.value = '';
+      sent.textContent = 'Sent to the chat';
+    },
+  }, input, el('button', { type: 'submit' }, 'Send'), sent);
+}
+
+function noteToggle(item) {
+  return el('button', {
+    type: 'button', class: 'db-note-toggle',
+    onclick: (e) => {
+      const row = e.target.closest('.db-item, .db-runbar');
+      const existing = row.querySelector(':scope > .db-note') ?? (row.nextElementSibling?.matches('.db-note') ? row.nextElementSibling : null);
+      if (existing) return existing.remove();
+      const form = noteForm(item);
+      row.querySelector(':scope > .db-row')?.after(form) ?? row.after(form);
+      form.querySelector('input').focus();
+    },
+  }, 'Note');
+}
 
 /* ---------- Small DOM helper ---------- */
 
@@ -76,6 +116,7 @@ function renderItem(item) {
       el('span', { class: 'db-number' }, number),
       el('span', { class: 'db-label' }, item.label, el('small', {}, item.details.join(' · '))),
       el('span', { class: 'db-actions' },
+        noteToggle(`item ${number} (${item.label})`),
         el('button', { type: 'button', onclick: () => go(`from-${number}`) }, 'From here'),
         el('button', { type: 'button', onclick: () => go(`only-${number}`) }, 'Only this'))),
     item.children.length ? el('ol', {}, item.children.map(renderItem)) : null);
@@ -103,6 +144,7 @@ async function run(mode, path, items) {
     el('div', { class: 'db-runbar' },
       el('button', { type: 'button', onclick: () => go('') }, '← Timeline'),
       el('span', {}, el('strong', {}, MODE_LABELS[mode]), path ? ` · ${formatPath(path)} ${where}` : ''),
+      noteToggle(path ? `item ${formatPath(path)} (${where})` : 'the full experiment'),
       el('button', { type: 'button', onclick: () => location.reload() }, 'Restart')),
     stage);
 
@@ -114,7 +156,7 @@ async function run(mode, path, items) {
       await options.on_finish?.(data);
       exitFullscreen();
       // jsPsych writes its end message after this; render the results once it has.
-      setTimeout(() => finished(data.values(), mode, path), 0);
+      setTimeout(() => finished(data.values().map(nameStimulus), mode, path, items), 0);
     },
   });
   const full = await experiment.default(jsPsych, context);
@@ -142,8 +184,19 @@ function save(filename, mimeType, text) {
   }
 }
 
-function finished(rows, mode, path) {
+function describeRun(rows, mode, path, items, stopped) {
+  const what = mode === 'full' ? 'ran the full experiment'
+    : `ran ${mode === 'only' ? 'only' : 'from'} item ${formatPath(path)} (${labelsAlong(items, path).join(' › ')})`;
+  const columns = [...new Set(rows.flatMap(Object.keys))];
+  // Hashed file URLs are noise for Claude once stimulus_name is there.
+  const sample = JSON.stringify(rows.slice(0, 3).map(({ stimulus, ...row }) => (row.stimulus_name ? row : { stimulus, ...row }))).slice(0, 1200);
+  return `${what} with the ${RECRUITMENT[recruitment]} blocks: ${rows.length} rows, ${stopped ? `stopped early (${stopped})` : 'finished normally'}. ` +
+    `Columns: ${columns.join(', ')}. First rows: ${sample}`;
+}
+
+function finished(rows, mode, path, items) {
   const stopped = rows.find((r) => r.stopped)?.stopped;
+  toPanel({ type: 'second-order:run', summary: describeRun(rows, mode, path, items, stopped) });
   const stem = `v${config.version}-${mode}${path ? `-${formatPath(path)}` : ''}`;
   const columns = [...new Set(rows.flatMap(Object.keys))];
   const shown = rows.slice(0, 200);
@@ -158,6 +211,8 @@ function finished(rows, mode, path) {
       el('button', { type: 'button', onclick: () => save(`${stem}.csv`, 'text/csv', toCsv(rows)) }, 'Download CSV'),
       el('button', { type: 'button', onclick: () => save(`${stem}.json`, 'application/json', JSON.stringify(rows, null, 2)) }, 'Download JSON'),
       el('button', { type: 'button', onclick: () => go('') }, '← Timeline')),
+    noteForm(mode === 'full' ? 'this run of the full experiment' : `this run of item ${formatPath(path)} (${labelsAlong(items, path).join(' › ')})`,
+      'Tell Claude about this run…'),
     el('div', { class: 'db-table' },
       el('table', {},
         el('thead', {}, el('tr', {}, columns.map((c) => el('th', {}, c)))),

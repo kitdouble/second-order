@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { db, newId, newToken, now } from './db.js';
 import { config } from './config.js';
 import { compileExperiment } from './compile.js';
-import { currentManifest, fileUrl } from './stimuli.js';
+import { currentManifest, extensionOf, fileUrl, MIME } from './stimuli.js';
 
 export class StudyError extends Error {}
 
@@ -97,6 +97,18 @@ export function describeStudy(user, studyId, versionNumber) {
       code: shown.code,
     }),
   };
+}
+
+/** Everything the in-chat panel shows for one version of a study. */
+export function panelState(user, studyId, versionNumber) {
+  const study = describeStudy(user, studyId, versionNumber);
+  if (!study.version) throw new StudyError('This study has no versions yet. Save one with save_version.');
+  const row = db.prepare('SELECT stimuli FROM study_versions WHERE study_id = ? AND number = ?').get(study.id, study.version);
+  const stimuli = Object.entries(JSON.parse(row.stimuli)).sort(([a], [b]) => a.localeCompare(b)).map(([name, sha]) => ({
+    name, type: MIME[extensionOf(name)] ?? 'application/octet-stream', url: `${config.runOrigin}${fileUrl(name, sha)}`,
+  }));
+  const { code: _code, packages: _packages, ...rest } = study;
+  return { ...rest, stimuli };
 }
 
 /* ---------- Versions ---------- */

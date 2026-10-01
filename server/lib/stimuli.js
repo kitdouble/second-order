@@ -43,6 +43,15 @@ export function fileName(url) {
   return names.find((n) => files[n] === url) ?? url;
 }
 
+/** Adds stimulus_name to a data row whose stimulus is an uploaded file (URLs are content hashes). */
+export function nameStimulus(row) {
+  const s = row?.stimulus;
+  if (typeof s === "string" && s in byUrl) row.stimulus_name = byUrl[s];
+  else if (Array.isArray(s) && s.some((x) => x in byUrl)) row.stimulus_name = s.map((x) => byUrl[x] ?? x);
+  return row;
+}
+const byUrl = Object.fromEntries(Object.entries(files).map(([name, url]) => [url, name]));
+
 /** Every stimulus URL, grouped for jsPsych's preload plugin. */
 export function allStimuli() {
   const pick = (pattern) => names.filter((n) => pattern.test(n)).map((n) => files[n]);

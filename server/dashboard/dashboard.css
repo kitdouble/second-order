@@ -265,3 +265,53 @@
     padding-left: 3.4rem;
   }
 }
+
+/* Notes to Claude: only inside a chat panel that accepts messages (body.db-feedback). */
+.db-note-toggle,
+.db-note {
+  display: none !important;
+}
+
+body.db-feedback .db-note-toggle {
+  display: inline-block !important;
+}
+
+body.db-feedback .db-note {
+  display: flex !important;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.db-runbar + .db-note,
+.db-runbar .db-note {
+  padding: 0 0.75rem;
+}
+
+.db-note input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #000;
+  font: 0.85rem 'Inter', system-ui, sans-serif;
+}
+
+.db-note button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid #000;
+  background: #000;
+  color: #fff;
+  font: 500 0.72rem/1 'Inter', system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.db-sent {
+  font-size: 0.75rem;
+  color: #5f6368;
+}
+
+.db-item > .db-note {
+  margin-left: 3.4rem;
+}

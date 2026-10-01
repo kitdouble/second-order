@@ -83,7 +83,8 @@ stimulus: () => stimulus(jsPsych.evaluateTimelineVariable("face")),
 data: { face: jsPsych.timelineVariable("face") },          // record the name, not the URL
 \`\`\`
 
-- Record stimulus names in data, never URLs (URLs are content hashes). Also available: stimuliIn(folder) for
+- Record stimulus names in data, never URLs (URLs are content hashes). Rows whose \`stimulus\` is an uploaded
+  file also get a \`stimulus_name\` column automatically. Also available: stimuliIn(folder) for
   URLs, stimulusName(url) to map a URL back to its name.
 - A version keeps exactly the files that existed when it was saved: after adding or replacing files, save a
   new version. stimulus() throws for a name that isn't in the version (simulate catches this).
@@ -94,7 +95,8 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
 
 1. create_study (once), then save_version with the full module. Every save is a new, immutable version.
 2. simulate the new version (a few participants) and fix any errors or unexpected data before going on.
-   Check value_counts: conditions balanced, data columns the analysis needs present.
+   Check value_counts (counted per participant for columns with one value per participant, e.g. condition):
+   conditions balanced, and the columns the analysis needs present.
 3. show_dashboard so the researcher can try it (in the chat where supported; always also give the
    dashboard_url). The dashboard lists the timeline and runs all of it, from any item or only one item,
    showing the data at the end; it saves nothing. preview_url is the full participant experience and saves
