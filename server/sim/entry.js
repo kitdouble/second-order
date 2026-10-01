@@ -41,6 +41,8 @@ function standInSimulate(trial, _mode, options) {
   this.jsPsych.finishTrial({ ...data, ...(options?.data ?? {}) });
 }
 
+let currentName = null;
+
 window.__soSimulation = (async () => {
   const options = experiment.options ?? {};
   const jsPsych = initJsPsych({
@@ -49,13 +51,19 @@ window.__soSimulation = (async () => {
     on_trial_start(trial) {
       // Progress, so a run that stalls can say where.
       window.__soCurrentTrial = { plugin: trial.type?.info?.name ?? 'unknown', name: trial.name ?? null, completed: jsPsych.data.get().count() };
+      currentName = trial.name ?? null;
       const proto = trial.type?.prototype;
       if (proto && typeof proto.simulate !== 'function' && trial.type.info?.name !== 'call-function') proto.simulate = standInSimulate;
       return options.on_trial_start?.(trial);
     },
+    on_data_update(data) {
+      data.trial_name = currentName;
+      return options.on_data_update?.(data);
+    },
   });
   const context = { mode: 'simulation', recruitment: sim.recruitment, version: sim.version };
-  setContext(context);
+  // Simulated participants rotate through conditions, as balanced assignment would give them.
+  setContext({ ...context, jsPsych, assign: async (_name, conditions) => conditions[(sim.participant ?? 0) % conditions.length] });
   const timeline = await experiment.default(jsPsych, context);
   await jsPsych.simulate(timeline, 'data-only', sim.simulationOptions ?? {});
   return jsPsych.data.get().values().map(nameStimulus);

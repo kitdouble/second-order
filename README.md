@@ -22,6 +22,10 @@ shows the connector URL.
 | `save_version` | owner, admin | compile and save a new immutable version; returns its preview link |
 | `simulate` | owner, admin | run simulated participants (sandboxed) and summarise their data |
 | `show_dashboard` | owner, admin | in-chat panel: dashboard, study overview (links, counts, versions, stimuli) |
+| `check_launch` | owner, admin | simulate + pre-launch checklist (pass / warn / fail), shown in the panel |
+| `study_status` | owner, admin | completion, in progress / abandoned, dropout points, browser errors, durations |
+| `create_download_link` | owner, admin | one-hour link to the full CSV/JSON, outside the chat |
+| `delete_participant_data` / `list_deletions` | owner, admin | withdrawals and test-data cleanup, logged without data |
 | `list_stimuli` / `remove_stimulus` | owner, admin | the study's stimulus files |
 | `create_upload_link` | owner, admin | one-hour page for dragging in stimulus files |
 | `add_stimulus` / `import_stimulus_from_url` | owner, admin | add generated or public files |
@@ -54,6 +58,11 @@ App, protocol 2026-01-26, with a hand-written bridge): tabs for the dashboard, t
 switchable versions, stimulus thumbnails) and simulation results (per-participant outcomes, value counts per
 column). Where the host allows, the researcher's notes go to the chat (`ui/message`), each dashboard run is
 summarised into Claude's context (`ui/update-model-context`), and downloads go through the host.
+
+Live runs: the runtime numbers rows itself, reports browser errors and progress, checkpoints after every
+top-level timeline item and resumes from there after a reload (same seed, same assigned condition; the
+partial item's rows are replaced). A participant ID can complete a study once. `assignCondition()` is
+balanced server-side per link.
 
 Participants use a separate origin (`RUN_ORIGIN`, `run.2ndorder.live`) served by `server/run.js`, with a
 strict CSP (data can only go back to Second Order). `server/runtime/client.js` wraps every experiment: it

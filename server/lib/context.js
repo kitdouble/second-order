@@ -1,5 +1,12 @@
 // Run details the blocks need, set by the runtime (or the simulator) before buildTimeline runs.
-export const context = { mode: "preview", recruitment: "prolific", version: 0 };
+export const context = {
+  mode: "preview",
+  recruitment: "prolific",
+  version: 0,
+  jsPsych: null,
+  // Replaced by the runtime (server-balanced), the simulator (rotates) and the dashboard (random).
+  assign: async (_name, conditions) => conditions[Math.floor(Math.random() * conditions.length)],
+};
 
 export const setContext = (values) => Object.assign(context, values);
 
@@ -29,4 +36,25 @@ export function compensation(minutesGiven) {
     return { minutes, payment };
   }
   return null;
+}
+
+/**
+ * Balanced condition assignment, done by the server: each new participant gets the condition with the
+ * fewest participants so far on their link (completed, plus those active in the last 30 minutes). The
+ * choice is saved, so a participant who reloads gets the same one, and it's added to every data row as
+ * `name` (default "condition"). Call it in buildTimeline, which must then be async:
+ *
+ *   export default async function buildTimeline(jsPsych) {
+ *     const condition = await assignCondition(["speed", "accuracy"]);
+ */
+export async function assignCondition(conditions, { name = "condition" } = {}) {
+  if (!Array.isArray(conditions) || conditions.length < 2) throw new Error("assignCondition needs a list of at least two conditions.");
+  const labels = conditions.map(String);
+  if (new Set(labels).size !== labels.length) throw new Error("assignCondition: conditions must be different from each other.");
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,40}$/.test(name)) throw new Error("assignCondition: name must be a simple column name, e.g. \"condition\".");
+  const value = await context.assign(name, labels);
+  const chosen = conditions[labels.indexOf(value)];
+  if (chosen === undefined) throw new Error(`assignCondition: the server returned "${value}", which isn't one of the conditions.`);
+  context.jsPsych?.data.addProperties({ [name]: chosen });
+  return chosen;
 }

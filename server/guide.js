@@ -38,11 +38,20 @@ export default function buildTimeline(jsPsych, context) {
 - Put everything the analysis needs in each trial's \`data\` (condition, correct response, \`correct\`, item ids),
   so every row stands alone. Use \`jsPsych.timelineVariable(...)\` for timeline variables in parameters, and
   \`jsPsych.evaluateTimelineVariable(...)\` inside functions.
-- Participant IDs (Prolific PID/study/session, SONA id), run id, version and timestamps are added to the data
-  by Second Order. Don't read URL parameters yourself.
+- Participant IDs (Prolific PID/study/session, SONA id), run id, version, run_status, timestamps and
+  \`trial_name\` (each trial's name) are added to the data by Second Order. Don't read URL parameters yourself.
+- Reloads: a participant who reloads continues from the start of the top-level timeline item they were in
+  (that item's partial rows are replaced; later rows get \`attempt\`). So keep top-level items reasonably
+  short (e.g. instructions, practice, block 1, block 2) rather than one huge block. A participant who has
+  completed the study can't take it again (across all its links).
 - Inline HTML stimuli are fine. Inline <script> and on* attributes do not run (strict Content Security Policy).
-- Randomisation: use jsPsych's own (randomize_order, sample, jsPsych.randomization.*). For between-subjects
-  conditions, pick with jsPsych.randomization and record the condition with jsPsych.data.addProperties.
+- Between-subjects conditions: always \`await assignCondition(["a", "b"])\` (from "second-order"), which the server
+  balances across participants on the link and records as a \`condition\` column (name it with
+  { name: "group" }); buildTimeline must then be async. Never pick conditions with Math.random or
+  jsPsych.randomization: that doesn't balance groups.
+- Other randomisation (trial order etc.): jsPsych's own (randomize_order, sample, jsPsych.randomization.*).
+  Second Order seeds it per participant, so a participant who reloads gets the same order.
+- Give attention checks a name containing "attention check" so check_launch and the data can find them.
 - Do not write consent forms or debriefs from scratch: ethics-approved wording must come from the researcher,
   word for word.
 
@@ -101,9 +110,13 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
    dashboard_url). The dashboard lists the timeline and runs all of it, from any item or only one item,
    showing the data at the end; it saves nothing. preview_url is the full participant experience and saves
    test data.
-4. When they are happy, create_participant_link for that exact version (Prolific needs the completion URL
+4. check_launch (with the recruitment, completion URL and the columns the analysis needs); fix every fail and
+   go through warnings with the researcher.
+5. When they are happy, create_participant_link for that exact version (Prolific needs the completion URL
    from Prolific). That version is what participants get, even after later saves.
-5. get_data returns the trial rows as CSV (test data excluded unless include_test is true).
+6. While collecting: study_status (completion, dropouts, browser errors). get_data returns trial rows as CSV
+   (capped; test data excluded unless include_test); create_download_link gives the researcher the full file
+   without it passing through the chat. Withdrawals: delete_participant_data, only when the researcher asks.
 
 ## Available packages (exact versions)
 

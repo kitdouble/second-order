@@ -5,6 +5,7 @@ import { db, newId, newToken, now } from './db.js';
 import { config } from './config.js';
 import { compileExperiment } from './compile.js';
 import { currentManifest, extensionOf, fileUrl, MIME } from './stimuli.js';
+import { studyStatus as statusFor } from './monitor.js';
 
 export class StudyError extends Error {}
 
@@ -108,7 +109,7 @@ export function panelState(user, studyId, versionNumber) {
     name, type: MIME[extensionOf(name)] ?? 'application/octet-stream', url: `${config.runOrigin}${fileUrl(name, sha)}`,
   }));
   const { code: _code, packages: _packages, ...rest } = study;
-  return { ...rest, stimuli };
+  return { ...rest, stimuli, status: statusFor(user, study.id) };
 }
 
 /* ---------- Versions ---------- */
@@ -197,16 +198,16 @@ export function exportData(user, studyId, { version, include_test = false, compl
   const args = [study.id];
   if (version != null) { where.push('v.number = ?'); args.push(version); }
   if (!include_test) where.push('r.is_test = 0');
-  if (completed_only) where.push('r.finished_at IS NOT NULL');
+  if (completed_only) where.push('r.finished_at IS NOT NULL AND r.stopped IS NULL');
 
   const rows = db.prepare(
     `SELECT r.id AS run_id, v.number AS version, r.is_test, r.participant_id, r.params,
-            r.started_at, r.finished_at, t.data
+            r.started_at, r.finished_at, r.stopped, t.data
      FROM runs r JOIN study_versions v ON v.id = r.version_id JOIN trials t ON t.run_id = r.id
      WHERE ${where.join(' AND ')}
      ORDER BY r.started_at, t.trial_index
      LIMIT ?`
-  ).all(...args, max_rows + 1);
+  ).all(...args, Number.isFinite(max_rows) ? max_rows + 1 : -1);
 
   const truncated = rows.length > max_rows;
   const records = rows.slice(0, max_rows).map((row) => ({
@@ -217,10 +218,11 @@ export function exportData(user, studyId, { version, include_test = false, compl
     ...Object.fromEntries(Object.entries(JSON.parse(row.params)).map(([k, v]) => [`param_${k}`, v])),
     run_started: iso(row.started_at),
     run_completed: iso(row.finished_at),
+    run_status: row.finished_at ? (row.stopped ? `stopped: ${row.stopped}` : 'completed') : 'incomplete',
     ...JSON.parse(row.data),
   }));
   const all = [...new Set(records.flatMap(Object.keys))];
-  const first = ['run_id', 'version', 'test', 'participant_id', ...all.filter((c) => c.startsWith('param_')), 'run_started', 'run_completed'];
+  const first = ['run_id', 'version', 'test', 'participant_id', ...all.filter((c) => c.startsWith('param_')), 'run_started', 'run_completed', 'run_status'];
   const columns = [...first.filter((c) => all.includes(c)), ...all.filter((c) => !first.includes(c))];
   const csv = [columns.join(','), ...records.map((r) => columns.map((c) => csvCell(r[c])).join(','))].join('\n');
 
@@ -228,5 +230,5 @@ export function exportData(user, studyId, { version, include_test = false, compl
     `SELECT COUNT(*) AS started, COUNT(r.finished_at) AS completed FROM runs r JOIN study_versions v ON v.id = r.version_id
      WHERE ${where.join(' AND ')}`
   ).get(...args);
-  return { runs, rows: records.length, truncated, csv };
+  return { runs, rows: records.length, truncated, csv, records, columns };
 }

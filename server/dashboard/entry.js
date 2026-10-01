@@ -149,9 +149,18 @@ async function run(mode, path, items) {
     stage);
 
   const options = experiment.options ?? {};
+  let currentName = null;
   const jsPsych = initJsPsych({
     ...options,
     display_element: stage,
+    on_trial_start(trial) {
+      currentName = trial.name ?? null;
+      return options.on_trial_start?.(trial);
+    },
+    on_data_update(data) {
+      data.trial_name = currentName;
+      return options.on_data_update?.(data);
+    },
     async on_finish(data) {
       await options.on_finish?.(data);
       exitFullscreen();
@@ -159,6 +168,7 @@ async function run(mode, path, items) {
       setTimeout(() => finished(data.values().map(nameStimulus), mode, path, items), 0);
     },
   });
+  setContext({ ...context, jsPsych }); // assignCondition picks at random here; nothing is saved
   const full = await experiment.default(jsPsych, context);
   const timeline = mode === 'from' ? sliceFrom(full, path) : mode === 'only' ? sliceOnly(full, path) : full;
   await jsPsych.run(timeline);

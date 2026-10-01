@@ -11,6 +11,8 @@ import { CompileError } from './compile.js';
 import { authoringGuide } from './guide.js';
 import { addStimulus, createUploadLink, importFromUrl, listStimuli, removeStimulus } from './stimuli.js';
 import { simulate } from './simulate.js';
+import { checkLaunch, studyStatus } from './monitor.js';
+import { createDownloadLink, deleteData, deletionLog } from './data.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
 const text = (value) => ({
@@ -165,7 +167,8 @@ function buildServer() {
   server.registerTool('get_data', {
     title: 'Get data',
     description:
-      'Collected trial data as CSV, one row per trial with run, version and participant columns first. ' +
+      'Collected trial data as CSV, one row per trial with run, version, participant and run_status (completed / stopped / incomplete) columns first. ' +
+      'Rows are capped; for the full file, or to keep data out of the chat, use create_download_link. ' +
       'Test (preview) data is excluded unless include_test is true. Participant IDs are pseudonymous platform IDs.',
     inputSchema: {
       study_id: z.string(),
@@ -232,6 +235,77 @@ function buildServer() {
       structuredContent: { view: 'dashboard', study },
     };
   }));
+
+  /* ---------- Running a study ---------- */
+
+  server.registerTool('study_status', {
+    title: 'Study status',
+    description:
+      'How a study is going: per participant link, started / completed / in progress / abandoned / stopped early, completion rate, ' +
+      'durations (median, quartiles), where participants who did not finish left off, errors from participants\' browsers (grouped, with ' +
+      'trials and browsers), browsers used, recent sessions, and the same for preview (test) runs. Check it regularly while collecting data.',
+    inputSchema: { study_id: z.string(), version: z.number().int().positive().optional() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, version }, extra) => text(studyStatus(userOf(extra), study_id, { version }))));
+
+  server.registerTool('check_launch', {
+    title: 'Check launch readiness',
+    description:
+      'Before creating a participant link: simulates the version and checks consent and debrief, stated length against measured completion ' +
+      'times, that someone has completed the preview, device check, preloading and stimulus size, balanced assignment, attention checks, ' +
+      'columns the analysis needs, the completion URL and other open links. Returns pass / warn / fail per check. Fix every fail; go ' +
+      'through warnings with the researcher.',
+    inputSchema: {
+      study_id: z.string(),
+      version: z.number().int().positive().optional(),
+      recruitment: z.enum(['prolific', 'sona', 'lab', 'none']).default('prolific'),
+      completion_url: z.string().optional(),
+      required_columns: z.array(z.string()).default([]).describe('Data columns the planned analysis needs, e.g. ["condition", "correct", "rt"]'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    _meta: panelToolMeta,
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const check = await checkLaunch(userOf(extra), study_id, args);
+    return { ...text(check), structuredContent: { view: 'check', check, study: panelState(userOf(extra), study_id, check.version) } };
+  }));
+
+  server.registerTool('create_download_link', {
+    title: 'Create data download link',
+    description:
+      'A link (valid 1 hour) that downloads the full data set as CSV or JSON in the researcher\'s browser, with no row limit. The data never ' +
+      'passes through the chat: use this when the researcher wants the data file, for large data sets, or when data should not be sent to the AI.',
+    inputSchema: {
+      study_id: z.string(),
+      format: z.enum(['csv', 'json']).default('csv'),
+      version: z.number().int().positive().optional(),
+      include_test: z.boolean().default(false),
+      completed_only: z.boolean().default(false),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(createDownloadLink(userOf(extra), study_id, args))));
+
+  server.registerTool('delete_participant_data', {
+    title: 'Delete participant data',
+    description:
+      'Permanently delete data: one participant\'s sessions by platform ID (e.g. a withdrawal request), one session by run_id, or all test ' +
+      '(preview) data. Cannot be undone. Only call when the researcher has explicitly asked for this specific deletion; confirm the ID with ' +
+      'them first. The deletion is logged (who, when, why, how many sessions) without the data or the raw ID.',
+    inputSchema: {
+      study_id: z.string(),
+      participant_id: z.string().optional().describe('Prolific PID or SONA id'),
+      run_id: z.string().optional(),
+      test_data: z.boolean().optional().describe('true to delete all preview (test) data'),
+      reason: z.string().max(500).optional().describe('e.g. "Withdrawal request by email, 3 Oct"'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(deleteData(userOf(extra), study_id, args))));
+
+  server.registerTool('list_deletions', {
+    title: 'List deletions',
+    description: 'The study\'s deletion log: when data was deleted, what scope, how many sessions and why.',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async ({ study_id }, extra) => text(deletionLog(userOf(extra), study_id))));
 
   /* ---------- Stimuli ---------- */
 

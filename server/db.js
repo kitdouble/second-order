@@ -182,6 +182,61 @@ addColumn('study_versions', 'dash_js', 'TEXT');
 addColumn('study_versions', 'dash_css', 'TEXT');
 addColumn('study_versions', 'dash_hash', 'TEXT');
 addColumn('study_versions', 'dash_build', 'TEXT');
+// Monitoring and resume.
+addColumn('runs', 'last_seen_at', 'INTEGER');           // last data/progress from the browser
+addColumn('runs', 'last_trial_index', 'INTEGER');
+addColumn('runs', 'last_trial_name', 'TEXT');
+addColumn('runs', 'seed', 'TEXT');                       // jsPsych randomisation seed, reused on resume
+addColumn('runs', 'checkpoint_block', 'INTEGER NOT NULL DEFAULT 0');   // top-level timeline items completed
+addColumn('runs', 'checkpoint_trial', 'INTEGER NOT NULL DEFAULT 0');   // trial rows kept at that point
+addColumn('runs', 'attempts', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('runs', 'resume_hash', 'TEXT');                // browser's resume token (hashed)
+
+db.exec(`
+  -- Errors and other events reported by participants' browsers.
+  CREATE TABLE IF NOT EXISTS run_events (
+    id          INTEGER PRIMARY KEY,
+    run_id      TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,              -- error | stall
+    message     TEXT NOT NULL,
+    trial_index INTEGER,
+    trial_name  TEXT,
+    detail      TEXT,
+    at          INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS run_events_run ON run_events(run_id);
+
+  -- Server-side condition assignment (balanced within a link); one value per run and name.
+  CREATE TABLE IF NOT EXISTS assignments (
+    run_id  TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    name    TEXT NOT NULL,
+    value   TEXT NOT NULL,
+    at      INTEGER NOT NULL,
+    PRIMARY KEY (run_id, name)
+  );
+
+  -- Expiring links for downloading data outside the chat.
+  CREATE TABLE IF NOT EXISTS download_links (
+    token_hash  TEXT PRIMARY KEY,
+    study_id    TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    options     TEXT NOT NULL,              -- JSON export options
+    expires_at  INTEGER NOT NULL
+  );
+
+  -- What was deleted, by whom and why. No data and no raw participant IDs are kept.
+  CREATE TABLE IF NOT EXISTS deletions (
+    id                    INTEGER PRIMARY KEY,
+    study_id              TEXT NOT NULL,
+    runs                  INTEGER NOT NULL,
+    participant_id_hash   TEXT,
+    scope                 TEXT NOT NULL,     -- participant | run | test
+    reason                TEXT,
+    deleted_by            TEXT NOT NULL,
+    at                    INTEGER NOT NULL
+  );
+`);
+db.exec('CREATE INDEX IF NOT EXISTS runs_participant ON runs(study_id, participant_id)');
 
 export const now = () => Date.now();
 export const DAY = 24 * 60 * 60 * 1000;
@@ -206,7 +261,7 @@ export function findOpenInvite(token) {
 
 export function pruneExpired() {
   db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now());
-  for (const table of ['challenges', 'oauth_requests', 'oauth_codes', 'oauth_tokens', 'upload_links']) {
+  for (const table of ['challenges', 'oauth_requests', 'oauth_codes', 'oauth_tokens', 'upload_links', 'download_links']) {
     db.prepare(`DELETE FROM ${table} WHERE expires_at <= ?`).run(now());
   }
 }

@@ -1,5 +1,6 @@
 // Browser runtime bundled around every experiment version. It owns everything that isn't the
-// experiment: starting a run, saving each trial as it happens, and ending the study.
+// experiment: starting (or resuming) a run, saving each trial as it happens, reporting errors and
+// progress, server-side condition assignment, and ending the study.
 import { initJsPsych } from 'jspsych';
 import { setContext } from '../lib/context.js';
 import { exitFullscreen } from '../lib/blocks/device.js';
@@ -7,11 +8,12 @@ import { nameStimulus } from '../lib/stimuli.js';
 
 const config = JSON.parse(document.getElementById('so-config').textContent);
 const query = new URLSearchParams(location.search);
+const live = config.mode === 'live';
 
 // Previews can show the Prolific (default), SONA or lab version of the blocks with ?recruitment=sona.
-const recruitment = config.mode === 'preview'
-  ? (['prolific', 'sona', 'lab'].includes(query.get('recruitment')) ? query.get('recruitment') : 'prolific')
-  : config.recruitment;
+const recruitment = live
+  ? config.recruitment
+  : (['prolific', 'sona', 'lab'].includes(query.get('recruitment')) ? query.get('recruitment') : 'prolific');
 
 async function post(path, body, { retries = 3 } = {}) {
   for (let attempt = 0; ; attempt++) {
@@ -42,8 +44,36 @@ function message(html) {
   target.innerHTML = html ? `<div class="so-message">${html}</div>` : '';
 }
 
+// A live run can be resumed after a reload; the server hands out a token kept in this browser.
+const RESUME_KEY = `so-run:${config.token}`;
+const resumeToken = {
+  get: () => { try { return localStorage.getItem(RESUME_KEY); } catch { return null; } },
+  set: (value) => { try { localStorage.setItem(RESUME_KEY, value); } catch { /* private mode */ } },
+  clear: () => { try { localStorage.removeItem(RESUME_KEY); } catch { /* private mode */ } },
+};
+
+let run = null;
+let currentName = null;
+let lastIndex = null;
+
+/* ---------- Errors ---------- */
+
+let reported = 0;
+function reportError(text, detail) {
+  if (!run || reported >= 20) return;
+  reported++;
+  post(`/api/runs/${run.id}/events`, {
+    key: run.key, kind: 'error', message: String(text).slice(0, 500), detail: String(detail ?? '').slice(0, 4000),
+    trial_index: lastIndex, trial_name: currentName,
+  }, { retries: 1 }).catch(() => {});
+}
+window.addEventListener('error', (e) => reportError(e.message, `${e.filename}:${e.lineno}:${e.colno}\n${e.error?.stack ?? ''}`));
+window.addEventListener('unhandledrejection', (e) => reportError(e.reason?.message ?? e.reason, e.reason?.stack));
+
+/* ---------- Run ---------- */
+
 export async function start(experiment) {
-  if (config.mode === 'preview') {
+  if (!live) {
     const banner = document.createElement('div');
     banner.className = 'so-banner';
     banner.textContent = `Preview of version ${config.version}: responses are saved as test data.`;
@@ -51,28 +81,45 @@ export async function start(experiment) {
     document.body.classList.add('so-preview');
   }
 
-  let run;
   try {
-    run = await post('/api/runs', { token: config.token, params: Object.fromEntries(query) });
+    run = await post('/api/runs', { token: config.token, params: Object.fromEntries(query), resume: live ? resumeToken.get() : null });
   } catch (err) {
     return message(`<p>${escape(err.message)}</p>`);
   }
+  if (live && run.resume_token) resumeToken.set(run.resume_token);
+  const resume = run.resume; // { block, trial_offset } when continuing an earlier attempt
+  const offset = resume?.trial_offset ?? 0;
 
   // Trials are saved one at a time, in order, so a participant who drops out still leaves data.
   let queue = Promise.resolve();
   let saveFailed = false;
-  const save = (data) => {
-    queue = queue
-      .then(() => post(`/api/runs/${run.id}/data`, { key: run.key, trial_index: data.trial_index, data }))
-      .catch(() => { saveFailed = true; });
+  let saved = offset;
+  let rowsThisAttempt = 0;
+  const enqueue = (fn) => {
+    queue = queue.then(fn).catch(() => { saveFailed = true; });
   };
 
   const options = experiment.options ?? {};
   jsPsych = initJsPsych({
     ...options,
     display_element: 'jspsych-target',
+    on_trial_start(trial) {
+      currentName = trial.name ?? null;
+      return options.on_trial_start?.(trial);
+    },
     on_data_update(data) {
-      save(nameStimulus(data));
+      // Rows are numbered by the runtime, 0, 1, 2, … continuing across attempts: jsPsych's own index also
+      // counts skipped blocks, which would leave gaps and let a resumed run's rows collide.
+      data.trial_index = offset + rowsThisAttempt++;
+      data.trial_name = currentName;
+      if (run.attempt > 1) data.attempt = run.attempt;
+      nameStimulus(data);
+      lastIndex = data.trial_index;
+      const name = currentName;
+      enqueue(async () => {
+        await post(`/api/runs/${run.id}/data`, { key: run.key, trial_index: data.trial_index, trial_name: name, data });
+        saved++;
+      });
       options.on_data_update?.(data);
     },
     async on_finish(data) {
@@ -86,24 +133,43 @@ export async function start(experiment) {
       if (saveFailed) return message('<p>Some responses could not be saved. Please contact the researcher.</p>');
       try {
         const { redirect } = await post(`/api/runs/${run.id}/finish`, { key: run.key, stopped });
+        resumeToken.clear();
         if (stopped) return message('');
         if (redirect) return window.location.replace(redirect);
-        message(config.mode === 'preview'
-          ? '<p>Preview finished. The data from this run is saved as test data.</p>'
-          : '<p>Thank you, you have finished the study. You can close this window.</p>');
+        message(live
+          ? '<p>Thank you, you have finished the study. You can close this window.</p>'
+          : '<p>Preview finished. The data from this run is saved as test data.</p>');
       } catch (err) {
         message(`<p>${escape(err.message)}</p>`);
       }
     },
   });
 
-  let timeline;
+  // The same seed on every attempt, so a resumed participant gets the same random choices.
+  jsPsych.randomization.setSeed(run.seed);
+
+  setContext({
+    mode: config.mode, recruitment, version: config.version, jsPsych,
+    assign: async (name, conditions) => (await post(`/api/runs/${run.id}/assign`, { key: run.key, name, conditions })).value,
+  });
+
+  let nodes;
   try {
-    setContext({ mode: config.mode, recruitment, version: config.version });
-    timeline = await experiment.default(jsPsych, { mode: config.mode, recruitment, version: config.version });
+    nodes = await experiment.default(jsPsych, { mode: config.mode, recruitment, version: config.version });
+    if (!Array.isArray(nodes)) throw new Error('buildTimeline must return an array.');
   } catch (err) {
     console.error(err);
-    return message(`<p>This study could not start.</p>${config.mode === 'preview' ? `<pre>${escape(err?.stack || err)}</pre>` : ''}`);
+    reportError(`buildTimeline failed: ${err?.message ?? err}`, err?.stack);
+    return message(`<p>This study could not start.</p>${live ? '' : `<pre>${escape(err?.stack || err)}</pre>`}`);
   }
+
+  // Checkpoint after each top-level item; a resumed run skips the items already completed and redoes
+  // the one it was in (the server drops that item's partial rows).
+  const startAt = resume?.block ?? 0;
+  const timeline = nodes.map((node, i) => ({
+    timeline: [node],
+    conditional_function: () => i >= startAt,
+    on_timeline_finish: () => enqueue(() => post(`/api/runs/${run.id}/checkpoint`, { key: run.key, block: i + 1, trial_count: saved })),
+  }));
   await jsPsych.run(timeline);
 }

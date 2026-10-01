@@ -448,3 +448,19 @@ details.technical summary {
   color: var(--text-2);
   cursor: pointer;
 }
+
+h3 .link {
+  float: right;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text-2);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.rows li strong {
+  display: block;
+  font-weight: 600;
+}

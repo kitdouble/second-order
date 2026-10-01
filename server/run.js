@@ -1,6 +1,7 @@
 // The participant-facing origin (run.2ndorder.live). It serves experiment pages and accepts their
 // data, and nothing else: no sessions, no admin API, no access to the main site's cookies.
 import express from 'express';
+import { randomBytes, randomInt } from 'node:crypto';
 import { join } from 'node:path';
 import { db, hash, newId, newToken, now } from './db.js';
 import { FILES_DIR, MIME, fileUrl } from './stimuli.js';
@@ -147,6 +148,46 @@ runApp.get('/f/:file', (req, res) => {
 
 runApp.use('/api', express.json({ limit: MAX_TRIAL_BYTES + 64 * 1024 }));
 
+const RESUME_WINDOW = 24 * 60 * 60 * 1000; // an unfinished live run can be picked up for a day
+const ACTIVE_WINDOW = 30 * 60 * 1000;      // unfinished runs count towards balancing for 30 minutes
+
+const newSeed = () => randomBytes(8).toString('hex');
+
+function startRun(link, { participantId, params, userAgent }) {
+  const id = newId();
+  const key = newToken();
+  const resumeToken = link.kind === 'live' ? newToken() : null;
+  const seed = newSeed();
+  db.prepare(
+    `INSERT INTO runs (id, link_token, study_id, version_id, is_test, key_hash, participant_id, params, user_agent, started_at,
+                       last_seen_at, seed, resume_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, link.token, link.study_id, link.version_id, link.kind === 'preview' ? 1 : 0, hash(key), participantId,
+    JSON.stringify(params), userAgent, now(), now(), seed, resumeToken && hash(resumeToken));
+  return { id, key, seed, attempt: 1, resume_token: resumeToken, resume: null };
+}
+
+// Pick up an unfinished run: new key, keep its seed, drop the rows of the block it was part-way through.
+function resumeRun(run) {
+  const key = newToken();
+  const resumeToken = newToken();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare('DELETE FROM trials WHERE run_id = ? AND trial_index >= ?').run(run.id, run.checkpoint_trial);
+    db.prepare(
+      'UPDATE runs SET key_hash = ?, resume_hash = ?, attempts = attempts + 1, last_seen_at = ?, bytes = (SELECT COALESCE(SUM(LENGTH(data)), 0) FROM trials WHERE run_id = ?) WHERE id = ?'
+    ).run(hash(key), hash(resumeToken), now(), run.id, run.id);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return {
+    id: run.id, key, seed: run.seed, attempt: run.attempts + 1, resume_token: resumeToken,
+    resume: { block: run.checkpoint_block, trial_offset: run.checkpoint_trial },
+  };
+}
+
 runApp.post('/api/runs', (req, res) => {
   const link = db.prepare('SELECT * FROM links WHERE token = ?').get(String(req.body?.token));
   if (!link) return fail(res, 404, 'This study link is not valid.');
@@ -156,20 +197,32 @@ runApp.post('/api/runs', (req, res) => {
   const given = req.body?.params && typeof req.body.params === 'object' ? req.body.params : {};
   const params = Object.fromEntries(rules.keep.filter((k) => typeof given[k] === 'string').map((k) => [k, given[k].slice(0, 200)]));
   const participantId = rules.id ? params[rules.id] : null;
-  if (link.kind === 'live' && rules.id && (!participantId || participantId.includes('%'))) {
-    return fail(res, 400, link.recruitment === 'prolific'
-      ? 'Please open this study from Prolific.'
-      : 'Please open this study from SONA.');
+  const userAgent = String(req.get('user-agent') ?? '').slice(0, 300);
+  if (link.kind === 'preview') return res.json(startRun(link, { participantId, params, userAgent }));
+
+  if (rules.id && (!participantId || participantId.includes('%'))) {
+    return fail(res, 400, link.recruitment === 'prolific' ? 'Please open this study from Prolific.' : 'Please open this study from SONA.');
   }
 
-  const id = newId();
-  const key = newToken();
-  db.prepare(
-    `INSERT INTO runs (id, link_token, study_id, version_id, is_test, key_hash, participant_id, params, user_agent, started_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, link.token, link.study_id, link.version_id, link.kind === 'preview' ? 1 : 0, hash(key),
-    participantId, JSON.stringify(params), String(req.get('user-agent') ?? '').slice(0, 300), now());
-  res.json({ id, key });
+  // One completion per participant per study, across all of its live links.
+  if (participantId) {
+    const done = db.prepare(
+      `SELECT 1 FROM runs WHERE study_id = ? AND participant_id = ? AND is_test = 0 AND finished_at IS NOT NULL AND stopped IS NULL`
+    ).get(link.study_id, participantId);
+    if (done) return fail(res, 409, 'You have already taken part in this study. Thank you!');
+  }
+
+  // Resume: this browser's token, or the same participant ID on this link, within a day.
+  const token = typeof req.body?.resume === 'string' ? req.body.resume : null;
+  const unfinished = (token && db.prepare(
+    'SELECT * FROM runs WHERE resume_hash = ? AND link_token = ? AND finished_at IS NULL AND started_at > ?'
+  ).get(hash(token), link.token, now() - RESUME_WINDOW))
+    ?? (participantId && db.prepare(
+      'SELECT * FROM runs WHERE participant_id = ? AND link_token = ? AND finished_at IS NULL AND started_at > ? ORDER BY started_at DESC LIMIT 1'
+    ).get(participantId, link.token, now() - RESUME_WINDOW));
+  if (unfinished && (!participantId || unfinished.participant_id === participantId)) return res.json(resumeRun(unfinished));
+
+  res.json(startRun(link, { participantId, params, userAgent }));
 });
 
 function ownedRun(req, res) {
@@ -193,8 +246,69 @@ runApp.post('/api/runs/:id/data', (req, res) => {
   // A retried trial replaces itself rather than duplicating.
   db.prepare('INSERT OR REPLACE INTO trials (run_id, trial_index, data, received_at) VALUES (?, ?, ?, ?)')
     .run(run.id, index, json, now());
-  db.prepare('UPDATE runs SET bytes = bytes + ? WHERE id = ?').run(json.length, run.id);
+  const name = typeof req.body.trial_name === 'string' ? req.body.trial_name.slice(0, 120) : null;
+  db.prepare('UPDATE runs SET bytes = bytes + ?, last_seen_at = ?, last_trial_index = ?, last_trial_name = ? WHERE id = ?')
+    .run(json.length, now(), index, name, run.id);
   res.json({ ok: true });
+});
+
+// After each top-level timeline item: where a resumed run continues from.
+runApp.post('/api/runs/:id/checkpoint', (req, res) => {
+  const run = ownedRun(req, res);
+  if (!run) return;
+  const block = Number(req.body.block);
+  const trials = Number(req.body.trial_count);
+  if (!Number.isInteger(block) || !Number.isInteger(trials) || block < run.checkpoint_block) return fail(res, 400, 'Invalid checkpoint.');
+  db.prepare('UPDATE runs SET checkpoint_block = ?, checkpoint_trial = ?, last_seen_at = ? WHERE id = ?').run(block, trials, now(), run.id);
+  res.json({ ok: true });
+});
+
+// Errors from the participant's browser, for study_status. Capped per run.
+runApp.post('/api/runs/:id/events', (req, res) => {
+  const run = ownedRun(req, res);
+  if (!run) return;
+  const count = db.prepare('SELECT COUNT(*) AS n FROM run_events WHERE run_id = ?').get(run.id).n;
+  if (count >= 30) return res.json({ ok: true });
+  const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : null);
+  db.prepare('INSERT INTO run_events (run_id, kind, message, trial_index, trial_name, detail, at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(run.id, req.body.kind === 'error' ? 'error' : 'other', str(req.body.message, 500) ?? 'Unknown error',
+      Number.isInteger(req.body.trial_index) ? req.body.trial_index : null, str(req.body.trial_name, 120), str(req.body.detail, 4000), now());
+  res.json({ ok: true });
+});
+
+// Balanced condition assignment: the least-used condition on this link, counting completed runs and runs
+// active in the last 30 minutes. Stable per run, so a resumed participant keeps their condition.
+runApp.post('/api/runs/:id/assign', (req, res) => {
+  const run = ownedRun(req, res);
+  if (!run) return;
+  const name = String(req.body.name ?? '');
+  const conditions = Array.isArray(req.body.conditions) ? req.body.conditions.map(String).slice(0, 50) : [];
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,40}$/.test(name) || conditions.length < 2 || conditions.some((c) => c.length > 200)) {
+    return fail(res, 400, 'Invalid assignment request.');
+  }
+  const existing = db.prepare('SELECT value FROM assignments WHERE run_id = ? AND name = ?').get(run.id, name);
+  if (existing) return res.json({ value: existing.value });
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const counts = Object.fromEntries(conditions.map((c) => [c, 0]));
+    const rows = db.prepare(
+      `SELECT a.value, COUNT(*) AS n FROM assignments a JOIN runs r ON r.id = a.run_id
+       WHERE r.link_token = ? AND a.name = ? AND r.stopped IS NULL
+         AND (r.finished_at IS NOT NULL OR COALESCE(r.last_seen_at, r.started_at) > ?)
+       GROUP BY a.value`
+    ).all(run.link_token, name, now() - ACTIVE_WINDOW);
+    for (const row of rows) if (row.value in counts) counts[row.value] = row.n;
+    const fewest = Math.min(...Object.values(counts));
+    const candidates = conditions.filter((c) => counts[c] === fewest);
+    const value = candidates[randomInt(candidates.length)];
+    db.prepare('INSERT INTO assignments (run_id, name, value, at) VALUES (?, ?, ?, ?)').run(run.id, name, value, now());
+    db.exec('COMMIT');
+    res.json({ value });
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 });
 
 // The completion URL is only revealed here, so it can't be read before doing the study. Runs a block

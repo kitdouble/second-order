@@ -42,7 +42,7 @@ const csvCell = (v) => { const s = cell(v); return /[",\n\r]/.test(s) ? `"${s.re
 const TECHNICAL = new Set([
   'width', 'height', 'browser', 'browser_version', 'mobile', 'os', 'fullscreen', 'device_type', 'device_allowed',
   'consent_form', 'debrief_form', 'plugin_version', 'success', 'timeout', 'failed_files', 'load_time_ms',
-  'rt_key_duration', 'internal_node_id', 'trial_type',
+  'rt_key_duration', 'internal_node_id', 'trial_type', 'attempt',
 ]);
 const NEVER = new Set(['time_elapsed', 'rt', 'trial_index', 'stimulus', 'response']); // stimulus_name is kept
 
@@ -83,7 +83,7 @@ export async function simulate(user, studyId, { version, participants = 3, recru
     const runs = [];
     for (let i = 0; i < participants; i++) {
       const t = Date.now();
-      const result = await runOne({ bundle, recruitment, version: v.number, simulationOptions: simulation_options });
+      const result = await runOne({ bundle, recruitment, version: v.number, participant: i, simulationOptions: simulation_options });
       runs.push({ ...result, ms: Date.now() - t });
     }
 

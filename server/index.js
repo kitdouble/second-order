@@ -9,6 +9,7 @@ import { consent, oauthRouter } from './oauth.js';
 import { mcp } from './mcp.js';
 import { runApp } from './run.js';
 import { uploads } from './uploads.js';
+import { downloads } from './data.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -34,6 +35,7 @@ main.use('/api/auth', auth);
 main.use('/api/oauth', consent);
 main.use(oauthRouter); // /.well-known/*, /authorize, /token, /register, /revoke
 main.use('/mcp', mcp);
+main.use('/api/downloads', downloads);
 main.get('/api/me', requireUser, (req, res) => res.json({ user: req.user }));
 main.get('/api/health', (_req, res) => res.json({ ok: true }));
 main.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));

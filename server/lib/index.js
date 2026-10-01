@@ -10,4 +10,4 @@ export { demographics } from "./blocks/demographics.js";
 export { deviceCheck, fullscreen } from "./blocks/device.js";
 export { preload } from "./blocks/preload.js";
 export { fileName as stimulusName, stimuliIn, stimulus, stimulusNamesIn } from "./stimuli.js";
-export { compensation, recruitment } from "./context.js";
+export { assignCondition, compensation, recruitment } from "./context.js";

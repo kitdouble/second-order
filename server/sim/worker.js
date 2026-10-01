@@ -44,7 +44,7 @@ try {
   });
   // Set here rather than via `resources`, which would also switch on fetching subresources.
   Object.defineProperty(dom.window.navigator, 'userAgent', { get: () => USER_AGENT });
-  dom.window.__SO_SIM__ = { recruitment: input.recruitment, version: input.version, simulationOptions: input.simulationOptions };
+  dom.window.__SO_SIM__ = { recruitment: input.recruitment, version: input.version, participant: input.participant, simulationOptions: input.simulationOptions };
   dom.window.eval(input.bundle);
   const rows = await dom.window.__soSimulation;
   finish({ rows: JSON.parse(JSON.stringify(rows)), standIns: [...dom.window.__soStandIns] });

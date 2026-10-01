@@ -25,7 +25,7 @@ const request = (method, params = {}) =>
   });
 
 let caps = {};
-const state = { study: null, simulation: null, tab: 'try' };
+const state = { study: null, simulation: null, check: null, tab: 'try' };
 
 window.addEventListener('message', (event) => {
   if (event.origin === RUN_ORIGIN && event.source === $('#frame').contentWindow) return fromDashboard(event.data);
@@ -78,7 +78,7 @@ const STATUS = {
   warning: ['■', 'warning'],
   critical: ['✕', 'critical'],
 };
-const status = (kind, label) => el('span', { class: `status ${STATUS[kind][1]}` }, el('i', {}, STATUS[kind][0]), label);
+const status_ = (kind, label) => el('span', { class: `status ${STATUS[kind][1]}` }, el('i', {}, STATUS[kind][0]), label);
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const date = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 
@@ -97,9 +97,11 @@ async function copy(text, input) {
 function receive(content) {
   if (!content?.study) return;
   if (content.simulation) state.simulation = content.simulation;
+  if (content.check) state.check = content.check;
   const versionChanged = state.study?.version !== content.study.version || state.study?.id !== content.study.id;
   state.study = content.study;
   if (content.view === 'simulation') state.tab = 'sim';
+  if (content.view === 'check') state.tab = 'check';
   render(versionChanged);
 }
 
@@ -117,9 +119,11 @@ function render(reloadFrame) {
   if (state.simulation) $('#tab-sim .count').textContent = state.simulation.version === study.version ? '' : `v${state.simulation.version}`;
   if (reloadFrame) $('#frame').src = study.dashboard_url;
 
+  $('#tab-check').hidden = !state.check;
   renderStudy();
   if (state.simulation) renderSimulation();
-  selectTab(state.tab === 'sim' && !state.simulation ? 'try' : state.tab);
+  if (state.check) renderCheck();
+  selectTab((state.tab === 'sim' && !state.simulation) || (state.tab === 'check' && !state.check) ? 'try' : state.tab);
 }
 
 function selectTab(tab) {
@@ -129,16 +133,56 @@ function selectTab(tab) {
   sizeChanged();
 }
 
+// Live counts for a link from study_status, if present.
+function linkStatus(link) {
+  const live = state.study.status?.links?.find((l) => l.url === link.url);
+  if (!live) return null;
+  return ` · ${live.in_progress} in progress · ${live.abandoned} abandoned${live.minutes?.median != null ? ` · median ${live.minutes.median} min` : ''}`;
+}
+
+async function refresh() {
+  try {
+    receive(await callTool('show_dashboard', { study_id: state.study.id, version: state.study.version }));
+  } catch { /* keep what is shown */ }
+}
+
+const CHECK_KIND = { pass: 'good', warn: 'warning', fail: 'critical' };
+const CHECK_LABEL = { pass: 'Pass', warn: 'Check', fail: 'Fix' };
+
+function renderCheck() {
+  const check = state.check;
+  $('#view-check').replaceChildren(el('div', { class: 'pad' },
+    el('h3', {}, `Launch check · v${check.version} · ${check.recruitment}`),
+    el('p', {}, status_(check.ready ? 'good' : 'critical', check.ready ? 'Ready' : 'Not ready'), ' ', check.summary),
+    el('ul', { class: 'rows' }, check.checks.map((c) =>
+      el('li', {}, status_(CHECK_KIND[c.status], CHECK_LABEL[c.status]), el('div', { class: 'grow' }, el('strong', {}, c.check), el('small', {}, c.detail))))),
+    el('p', { class: 'muted' }, check.note)));
+}
+
 function renderStudy() {
   const { study } = state;
   const links = study.participant_links;
   const view = $('#view-study');
+  const status = study.status;
+  const p = status?.participants ?? { started: 0, completed: 0, in_progress: 0, abandoned: 0, minutes: {} };
+  const tile = (value, label) => el('div', { class: 'tile' }, el('strong', {}, String(value ?? '–')), el('span', {}, label));
   view.replaceChildren(el('div', { class: 'pad' },
-    el('h3', {}, 'Participants'),
+    el('h3', {}, 'Participants', caps.serverTools ? el('button', { class: 'link', type: 'button', onclick: refresh }, 'Refresh') : null),
     el('div', { class: 'tiles' },
-      el('div', { class: 'tile' }, el('strong', {}, String(study.participants.started)), el('span', {}, 'started')),
-      el('div', { class: 'tile' }, el('strong', {}, String(study.participants.completed)), el('span', {}, 'completed')),
-      el('div', { class: 'tile' }, el('strong', {}, String(links.filter((l) => l.status === 'open').length)), el('span', {}, 'open links'))),
+      tile(p.started, 'started'),
+      tile(p.completed, 'completed'),
+      tile(p.in_progress, 'in progress'),
+      tile(p.abandoned, 'abandoned'),
+      tile(p.minutes?.median != null ? `${p.minutes.median}m` : null, 'median length')),
+    status?.errors?.length
+      ? el('div', {}, el('h3', {}, 'Errors in participants\' browsers'), el('ul', { class: 'rows' }, status.errors.slice(0, 5).map((e) =>
+          el('li', {}, status_('critical', `${e.participants}`), el('div', { class: 'grow' }, e.message,
+            el('small', {}, [e.trials.length ? `at ${e.trials.join(', ')}` : null, e.browsers.join(', ')].filter(Boolean).join(' · ')))))))
+      : null,
+    status?.dropouts?.length
+      ? el('div', {}, el('h3', {}, 'Where unfinished participants stopped'), el('ul', { class: 'rows' }, status.dropouts.slice(0, 5).map((d) =>
+          el('li', {}, el('span', { class: 'grow' }, d.where), el('span', {}, plural(d.participants, 'participant'))))))
+      : null,
 
     el('h3', {}, 'Participant links'),
     links.length
@@ -147,9 +191,9 @@ function renderStudy() {
           return el('li', {},
             el('div', { class: 'grow' },
               el('div', {}, link.label || `${link.recruitment} link`, ' ', el('span', { class: 'muted' }, `· v${link.version} · ${link.recruitment}`)),
-              el('small', {}, `${link.started} started · ${link.completed} completed`),
+              el('small', {}, `${link.started} started · ${link.completed} completed`, linkStatus(link)),
               input),
-            link.status === 'open' ? status('good', 'Open') : status('warning', 'Closed'),
+            link.status === 'open' ? status_('good', 'Open') : status_('warning', 'Closed'),
             el('button', { class: 'btn', type: 'button', onclick: async (e) => { e.target.textContent = (await copy(link.url, input)) ? 'Copied' : 'Selected'; } }, 'Copy'));
         }))
       : el('p', { class: 'muted' }, 'No participant links yet. When this version is ready, ask Claude to create one.'),
@@ -200,9 +244,9 @@ function renderSimulation() {
   $('#view-sim').replaceChildren(el('div', { class: 'pad' },
     el('h3', {}, `Simulated participants · v${sim.version} · ${sim.recruitment}`),
     el('div', { class: 'chips' },
-      done ? status('good', `${done} completed`) : null,
-      stopped ? status('warning', `${stopped} stopped early`) : null,
-      failed ? status('critical', `${failed} failed`) : null,
+      done ? status_('good', `${done} completed`) : null,
+      stopped ? status_('warning', `${stopped} stopped early`) : null,
+      failed ? status_('critical', `${failed} failed`) : null,
       el('span', { class: 'muted', style: 'align-self:center' }, `${sim.seconds}s`)),
     sim.participants.some((p) => p.stopped)
       ? el('p', { class: 'muted' }, 'Stopped by: ', [...new Set(sim.participants.map((p) => p.stopped).filter(Boolean))].join(', '))
