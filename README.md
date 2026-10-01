@@ -20,6 +20,10 @@ shows the connector URL.
 | `list_studies` / `get_study` | owner, admin | studies, versions, links, counts, code |
 | `create_study` | everyone | new empty study |
 | `save_version` | owner, admin | compile and save a new immutable version; returns its preview link |
+| `simulate` | owner, admin | run simulated participants (sandboxed) and summarise their data |
+| `list_stimuli` / `remove_stimulus` | owner, admin | the study's stimulus files |
+| `create_upload_link` | owner, admin | one-hour page for dragging in stimulus files |
+| `add_stimulus` / `import_stimulus_from_url` | owner, admin | add generated or public files |
 | `create_participant_link` | owner, admin | Prolific / SONA / lab link pinned to one version |
 | `close_participant_link` | owner, admin | stop accepting participants |
 | `get_data` | owner, admin | trial rows as CSV (test data excluded by default) |
@@ -30,6 +34,17 @@ shows the connector URL.
 Experiments are jsPsych v8 modules (`export default function buildTimeline(jsPsych, context)`), written by
 the assistant and compiled by `server/compile.js` with esbuild against the exact jsPsych packages in
 `package.json`. Each save is a new version whose bundle never changes; participant links pin one version.
+
+Experiments can `import { consent, deviceCheck, demographics, fullscreen, preload, debrief, stimulus } from
+"second-order"` (`server/lib/`): the lab's standard blocks, ported from the Meta Lab jsPsych kit. The
+consent and debrief wording is ethics-approved (HREC 2022/796); never edit it.
+
+Stimuli are stored once by SHA-256 in `<data dir>/files`; each version records the `{name: hash}` set it was
+saved with, so replacing a file never changes a saved version.
+
+`simulate` runs jsPsych's data-only simulation in jsdom, one participant per child process under Node's
+permission model (`server/sim/`). In production those processes belong to the `second-order-sim` service:
+no network, no database, read-only filesystem, memory-capped, reached over a unix socket (`SIM_SOCKET`).
 
 Participants use a separate origin (`RUN_ORIGIN`, `run.2ndorder.live`) served by `server/run.js`, with a
 strict CSP (data can only go back to Second Order). `server/runtime/client.js` wraps every experiment: it

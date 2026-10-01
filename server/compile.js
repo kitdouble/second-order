@@ -30,26 +30,32 @@ const noDefault = () =>
 
 const format = (m) => (m.location ? `line ${m.location.line}:${m.location.column + 1}: ${m.text}` : m.text);
 
-function experimentPlugin(code) {
+// manifest: {stimulus name: URL}, fixed into the bundle so a version always uses the same files.
+// external: leave packages unbundled (used for the quick shape check).
+function experimentPlugin(code, manifest = {}, { external = false } = {}) {
   return {
     name: 'second-order',
     setup(b) {
       b.onResolve({ filter: /^second-order:experiment$/ }, () => ({ path: 'experiment.js', namespace: 'experiment' }));
+      b.onResolve({ filter: /^second-order:manifest$/ }, () => ({ path: 'manifest.json', namespace: 'manifest' }));
+      b.onLoad({ filter: /.*/, namespace: 'manifest' }, () => ({ contents: JSON.stringify(manifest), loader: 'json' }));
+      b.onResolve({ filter: /^second-order$/ }, () => (external ? { path: 'second-order', external: true } : { path: resolve(root, 'server/lib/index.js') }));
       b.onResolve({ filter: /^second-order:runtime/ }, (args) => ({
         path: resolve(root, 'server/runtime', args.path.endsWith('.css') ? 'client.css' : 'client.js'),
       }));
       b.onLoad({ filter: /.*/, namespace: 'experiment' }, () => ({ contents: code, loader: 'js', resolveDir: root }));
       // Imports written in the experiment itself must name an available package.
       b.onResolve({ filter: /.*/, namespace: 'experiment' }, (args) => {
+        if (args.path === 'second-order') return external ? { path: args.path, external: true } : undefined;
         const name = packageOf(args.path);
         if (args.path.startsWith('.') || args.path.startsWith('/') || !(name in AVAILABLE_PACKAGES)) {
           return {
             errors: [{
-              text: `Cannot import "${args.path}". Experiments can only import jspsych and the installed @jspsych packages (see get_authoring_guide).`,
+              text: `Cannot import "${args.path}". Experiments can only import "second-order", jspsych and the installed @jspsych packages (see get_authoring_guide).`,
             }],
           };
         }
-        return undefined; // normal resolution from node_modules
+        return external ? { path: args.path, external: true } : undefined; // else normal resolution from node_modules
       });
     },
   };
@@ -63,14 +69,14 @@ import * as experiment from 'second-order:experiment';
 start(experiment);
 `;
 
-export async function compileExperiment(code) {
+export async function compileExperiment(code, manifest = {}) {
   // 1. Check the module's shape on its own, with packages left external.
   let shape;
   try {
     shape = await build({
       stdin: { contents: 'export * from "second-order:experiment"; export { default } from "second-order:experiment";', resolveDir: root },
       bundle: true, write: false, metafile: true, format: 'esm', logLevel: 'silent',
-      plugins: [experimentPlugin(code), { name: 'externals', setup: (b) => b.onResolve({ filter: /^(jspsych|@jspsych\/)/ }, (a) => ({ path: a.path, external: true })) }],
+      plugins: [experimentPlugin(code, manifest, { external: true })],
     });
   } catch (err) {
     const errors = err.errors ?? [{ text: err.message }];
@@ -88,7 +94,7 @@ export async function compileExperiment(code) {
       bundle: true, write: false, metafile: true, minify: true, format: 'iife', target: ['es2020'],
       outdir: 'out', entryNames: 'bundle', logLevel: 'silent', legalComments: 'none',
       loader: { '.woff': 'dataurl', '.woff2': 'dataurl', '.svg': 'dataurl', '.png': 'dataurl' },
-      plugins: [experimentPlugin(code)],
+      plugins: [experimentPlugin(code, manifest)],
     });
   } catch (err) {
     throw new CompileError((err.errors ?? [{ text: err.message }]).map(format));
@@ -107,4 +113,19 @@ export async function compileExperiment(code) {
   };
   const hash = createHash('sha256').update(js).update(css).digest('hex').slice(0, 16);
   return { js, css, packages, hash, warnings: result.warnings.map(format) };
+}
+
+// The same experiment and stimuli, built to run under jsPsych's data-only simulation (server/sim/).
+export async function compileSimulation(code, manifest = {}) {
+  try {
+    const result = await build({
+      stdin: { contents: "import './server/sim/entry.js';", resolveDir: root, loader: 'js' },
+      bundle: true, write: false, format: 'iife', target: ['es2022'], outdir: 'out', logLevel: 'silent',
+      loader: { '.css': 'empty', '.woff': 'empty', '.woff2': 'empty', '.svg': 'empty', '.png': 'dataurl' },
+      plugins: [experimentPlugin(code, manifest)],
+    });
+    return result.outputFiles.find((f) => f.path.endsWith('.js')).text;
+  } catch (err) {
+    throw new CompileError((err.errors ?? [{ text: err.message }]).map(format));
+  }
 }

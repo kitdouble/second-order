@@ -19,6 +19,8 @@ apt-get install -yq caddy
 
 # App user and directories: code in /opt, database in /var/lib
 id secondorder &>/dev/null || useradd --system --home /opt/second-order --shell /usr/sbin/nologin secondorder
+# Simulations run experiment code as their own user, in the secondorder group so the app can reach the socket.
+id secondorder-sim &>/dev/null || useradd --system --no-create-home --shell /usr/sbin/nologin --gid secondorder secondorder-sim
 mkdir -p /opt/second-order /var/lib/second-order
 chown secondorder:secondorder /var/lib/second-order
 chmod 700 /var/lib/second-order
@@ -29,13 +31,16 @@ APP_ORIGIN=https://${DOMAIN}
 RUN_ORIGIN=https://run.${DOMAIN}
 API_PORT=3000
 DB_PATH=/var/lib/second-order/second-order.db
+SIM_SOCKET=/run/second-order-sim/sim.sock
 ENV
 fi
+grep -q '^SIM_SOCKET=' /opt/second-order/.env || echo 'SIM_SOCKET=/run/second-order-sim/sim.sock' >> /opt/second-order/.env
 
 cat > /etc/systemd/system/second-order.service <<'UNIT'
 [Unit]
 Description=Second Order
-After=network.target
+After=network.target second-order-sim.service
+Wants=second-order-sim.service
 
 [Service]
 User=secondorder
@@ -47,13 +52,45 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/second-order
+ReadWritePaths=/var/lib/second-order -/run/second-order-sim
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# Simulated participants run untrusted experiment code: no network, no data, read-only, capped memory.
+cat > /etc/systemd/system/second-order-sim.service <<'UNIT'
+[Unit]
+Description=Second Order simulations
+After=network.target
+
+[Service]
+User=secondorder-sim
+Group=secondorder
+WorkingDirectory=/opt/second-order
+Environment=SIM_SOCKET=/run/second-order-sim/sim.sock
+ExecStart=/usr/bin/node server/sim/service.js
+Restart=on-failure
+RuntimeDirectory=second-order-sim
+RuntimeDirectoryMode=0750
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+InaccessiblePaths=/var/lib/second-order /var/backups -/opt/second-order/.env
+MemoryMax=700M
+TasksMax=64
+CPUQuota=150%
 
 [Install]
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-systemctl enable second-order
+systemctl enable second-order-sim second-order
 
 cat > /etc/caddy/Caddyfile <<CADDY
 ${DOMAIN}, run.${DOMAIN} {

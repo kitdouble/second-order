@@ -9,6 +9,8 @@ import { requireMcpAuth } from './oauth.js';
 import { closeLink, createLink, createStudy, describeStudy, exportData, listStudies, saveVersion, StudyError } from './studies.js';
 import { CompileError } from './compile.js';
 import { authoringGuide } from './guide.js';
+import { addStimulus, createUploadLink, importFromUrl, listStimuli, removeStimulus } from './stimuli.js';
+import { simulate } from './simulate.js';
 
 const text = (value) => ({
   content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
@@ -176,6 +178,68 @@ function buildServer() {
     const result = exportData(userOf(extra), study_id, args);
     return text(`${result.runs.started} sessions (${result.runs.completed} completed), ${result.rows} rows${result.truncated ? ' (truncated: raise max_rows or filter by version)' : ''}.\n\n${result.csv}`);
   }));
+
+  server.registerTool('simulate', {
+    title: 'Simulate participants',
+    description:
+      'Run simulated participants through a saved version (jsPsych data-only simulation in a sandboxed simulated browser) and ' +
+      'summarise the data: per-participant success/errors, columns, value counts (e.g. to check conditions and counterbalancing) and the ' +
+      'first participant\'s rows. Use after every save_version, before giving the researcher the preview link. Nothing is saved.',
+    inputSchema: {
+      study_id: z.string(),
+      version: z.number().int().positive().optional().describe('Defaults to the latest'),
+      participants: z.number().int().min(1).max(20).default(3),
+      recruitment: z.enum(['prolific', 'sona', 'lab', 'none']).default('prolific').describe('Which version of the standard blocks to run'),
+      simulation_options: z.record(z.string(), z.any()).optional().describe('Passed to jsPsych.simulate, e.g. {"default": {"data": {"rt": 600}}}'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(await simulate(userOf(extra), study_id, args))));
+
+  /* ---------- Stimuli ---------- */
+
+  server.registerTool('list_stimuli', {
+    title: 'List stimuli',
+    description: 'The study\'s current stimulus files (images, audio, video, CSV/JSON/text) by name, for use with stimulus("name") and stimuliIn("folder").',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async ({ study_id }, extra) => text(listStimuli(userOf(extra), study_id))));
+
+  server.registerTool('create_upload_link', {
+    title: 'Create upload link',
+    description: 'A link (valid 1 hour) to a page where the researcher can drag in stimulus files from their computer. Use for files the researcher has; ask them to tell you when they are done, then list_stimuli and save a new version.',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id }, extra) => text(createUploadLink(userOf(extra), study_id))));
+
+  server.registerTool('add_stimulus', {
+    title: 'Add stimulus',
+    description: 'Add a small file you generated (e.g. an SVG, a CSV of trial items) as a stimulus. Up to about 5 MB. Replaces a file with the same name.',
+    inputSchema: {
+      study_id: z.string(),
+      name: z.string().describe('File name, optionally in folders, e.g. "shapes/circle.svg"'),
+      content: z.string().max(7_000_000),
+      encoding: z.enum(['text', 'base64']).default('text'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(addStimulus(userOf(extra), study_id, args))));
+
+  server.registerTool('import_stimulus_from_url', {
+    title: 'Import stimulus from URL',
+    description: 'Download a file from a public https URL into the study\'s stimuli (up to 100 MB). Check the licence allows research use.',
+    inputSchema: {
+      study_id: z.string(),
+      url: z.string().url(),
+      name: z.string().optional().describe('Name to store it under; defaults to the URL\'s file name'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, handled(async ({ study_id, ...args }, extra) => text(await importFromUrl(userOf(extra), study_id, args))));
+
+  server.registerTool('remove_stimulus', {
+    title: 'Remove stimulus',
+    description: 'Remove a file from the study\'s current stimuli. Saved versions keep their copy.',
+    inputSchema: { study_id: z.string(), name: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, name }, extra) => text(removeStimulus(userOf(extra), study_id, name))));
 
   return server;
 }

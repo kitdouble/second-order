@@ -169,6 +169,15 @@ db.exec(`
   );
 `);
 
+// Columns added after a table first shipped (CREATE TABLE IF NOT EXISTS won't add them).
+function addColumn(table, column, definition) {
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+addColumn('runs', 'stopped', 'TEXT'); // why a block ended the run early, e.g. "device"
+addColumn('study_versions', 'stimuli', "TEXT NOT NULL DEFAULT '{}'"); // JSON {name: sha256} fixed at save
+
 export const now = () => Date.now();
 export const DAY = 24 * 60 * 60 * 1000;
 export const newId = () => randomUUID();
@@ -192,7 +201,7 @@ export function findOpenInvite(token) {
 
 export function pruneExpired() {
   db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now());
-  for (const table of ['challenges', 'oauth_requests', 'oauth_codes', 'oauth_tokens']) {
+  for (const table of ['challenges', 'oauth_requests', 'oauth_codes', 'oauth_tokens', 'upload_links']) {
     db.prepare(`DELETE FROM ${table} WHERE expires_at <= ?`).run(now());
   }
 }

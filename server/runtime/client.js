@@ -1,8 +1,16 @@
 // Browser runtime bundled around every experiment version. It owns everything that isn't the
 // experiment: starting a run, saving each trial as it happens, and ending the study.
 import { initJsPsych } from 'jspsych';
+import { setContext } from '../lib/context.js';
+import { exitFullscreen } from '../lib/blocks/device.js';
 
 const config = JSON.parse(document.getElementById('so-config').textContent);
+const query = new URLSearchParams(location.search);
+
+// Previews can show the Prolific (default), SONA or lab version of the blocks with ?recruitment=sona.
+const recruitment = config.mode === 'preview'
+  ? (['prolific', 'sona', 'lab'].includes(query.get('recruitment')) ? query.get('recruitment') : 'prolific')
+  : config.recruitment;
 
 async function post(path, body, { retries = 3 } = {}) {
   for (let attempt = 0; ; attempt++) {
@@ -25,8 +33,12 @@ async function post(path, body, { retries = 3 } = {}) {
 
 const escape = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
+let jsPsych = null;
+
+// Inside jsPsych's own display element once it exists, so jsPsych can still write its end message there.
 function message(html) {
-  document.getElementById('jspsych-target').innerHTML = `<div class="so-message">${html}</div>`;
+  const target = jsPsych?.getDisplayElement() ?? document.getElementById('jspsych-target');
+  target.innerHTML = html ? `<div class="so-message">${html}</div>` : '';
 }
 
 export async function start(experiment) {
@@ -40,7 +52,7 @@ export async function start(experiment) {
 
   let run;
   try {
-    run = await post('/api/runs', { token: config.token, params: Object.fromEntries(new URLSearchParams(location.search)) });
+    run = await post('/api/runs', { token: config.token, params: Object.fromEntries(query) });
   } catch (err) {
     return message(`<p>${escape(err.message)}</p>`);
   }
@@ -55,7 +67,7 @@ export async function start(experiment) {
   };
 
   const options = experiment.options ?? {};
-  const jsPsych = initJsPsych({
+  jsPsych = initJsPsych({
     ...options,
     display_element: 'jspsych-target',
     on_data_update(data) {
@@ -64,11 +76,16 @@ export async function start(experiment) {
     },
     async on_finish(data) {
       await options.on_finish?.(data);
+      exitFullscreen();
+      // A block that ends the run early (device check, failed preload) records why; jsPsych shows its
+      // message after this returns, and the participant is not sent to the completion link.
+      const stopped = data.values().find((row) => row.stopped)?.stopped ?? null;
       message('<p>Saving your responses…</p>');
       await queue;
       if (saveFailed) return message('<p>Some responses could not be saved. Please contact the researcher.</p>');
       try {
-        const { redirect } = await post(`/api/runs/${run.id}/finish`, { key: run.key });
+        const { redirect } = await post(`/api/runs/${run.id}/finish`, { key: run.key, stopped });
+        if (stopped) return message('');
         if (redirect) return window.location.replace(redirect);
         message(config.mode === 'preview'
           ? '<p>Preview finished. The data from this run is saved as test data.</p>'
@@ -81,7 +98,8 @@ export async function start(experiment) {
 
   let timeline;
   try {
-    timeline = await experiment.default(jsPsych, { mode: config.mode, version: config.version });
+    setContext({ mode: config.mode, recruitment, version: config.version });
+    timeline = await experiment.default(jsPsych, { mode: config.mode, recruitment, version: config.version });
   } catch (err) {
     console.error(err);
     return message(`<p>This study could not start.</p>${config.mode === 'preview' ? `<pre>${escape(err?.stack || err)}</pre>` : ''}`);

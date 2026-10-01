@@ -8,6 +8,7 @@ import { auth } from './auth.js';
 import { consent, oauthRouter } from './oauth.js';
 import { mcp } from './mcp.js';
 import { runApp } from './run.js';
+import { uploads } from './uploads.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -24,7 +25,8 @@ main.use((_req, res, next) => {
   });
   next();
 });
-main.use(express.json({ limit: '2mb' }));
+main.use('/api/uploads', uploads); // raw file bodies: before the JSON parser
+main.use(express.json({ limit: '8mb' })); // save_version and small add_stimulus payloads
 main.use(express.urlencoded({ extended: false, limit: '100kb' })); // OAuth token requests are form-encoded
 main.use(loadUser);
 

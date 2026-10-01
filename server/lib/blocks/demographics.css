@@ -1,0 +1,26 @@
+/* Demographic questions (src/blocks/demographics.js). */
+.demo-title { margin: 1rem 0 2rem; }
+.demo-form {
+  max-width: 520px;
+  margin: 0 auto 1.5rem;
+  text-align: left;
+}
+.demo-question {
+  margin: 0 0 1.25rem;
+  padding: 0;
+  border: none;
+}
+.demo-question legend {
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+.demo-option {
+  display: block;
+  padding: 0.35rem 0;
+  cursor: pointer;
+}
+.demo-age input {
+  width: 5rem;
+  padding: 0.3rem 0.4rem;
+  font: inherit;
+}

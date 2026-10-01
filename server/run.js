@@ -1,7 +1,9 @@
 // The participant-facing origin (run.2ndorder.live). It serves experiment pages and accepts their
 // data, and nothing else: no sessions, no admin API, no access to the main site's cookies.
 import express from 'express';
+import { join } from 'node:path';
 import { db, hash, newId, newToken, now } from './db.js';
+import { FILES_DIR, MIME } from './stimuli.js';
 
 const MAX_TRIAL_BYTES = 5 * 1024 * 1024; // audio/video/sketchpad responses can be large
 const MAX_RUN_BYTES = 100 * 1024 * 1024;
@@ -47,7 +49,7 @@ runApp.get('/s/:token', (req, res) => {
   if (!link) return res.status(404).type('html').send(page('<p>This study link is not valid.</p>'));
   if (link.closed_at) return res.status(410).type('html').send(page('<p>This study is closed. Thank you for your interest.</p>'));
 
-  const config = JSON.stringify({ token: link.token, mode: link.kind, version: link.number }).replace(/</g, '\\u003c');
+  const config = JSON.stringify({ token: link.token, mode: link.kind, recruitment: link.recruitment, version: link.number }).replace(/</g, '\\u003c');
   const asset = `/v/${link.vid}.${link.bundle_hash}`;
   res.type('html').send(page('', `
     <link rel="stylesheet" href="${asset}.css">
@@ -80,6 +82,22 @@ runApp.get('/v/:file', (req, res) => {
   res.set('Cache-Control', 'public, max-age=31536000, immutable')
     .type(m[3] === 'js' ? 'application/javascript' : 'text/css')
     .send(m[3] === 'js' ? v.bundle_js : v.bundle_css);
+});
+
+// Stimulus files, by content hash. Sandboxed so an SVG opened directly can't run script.
+runApp.get('/f/:file', (req, res) => {
+  const m = req.params.file.match(/^([0-9a-f]{64})\.([a-z0-9]+)$/);
+  if (!m || !(m[2] in MIME)) return res.sendStatus(404);
+  res.set({
+    'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+    'X-Content-Type-Options': 'nosniff',
+    'Cross-Origin-Resource-Policy': 'same-origin',
+  });
+  // Cache headers only travel with the file itself, never with an error.
+  const headers = { 'Content-Type': MIME[m[2]], 'Cache-Control': 'public, max-age=31536000, immutable' };
+  res.sendFile(join(FILES_DIR, m[1]), { headers }, (err) => {
+    if (err && !res.headersSent) res.sendStatus(404);
+  });
 });
 
 runApp.use('/api', express.json({ limit: MAX_TRIAL_BYTES + 64 * 1024 }));
@@ -134,11 +152,14 @@ runApp.post('/api/runs/:id/data', (req, res) => {
   res.json({ ok: true });
 });
 
-// The completion URL is only revealed here, so it can't be read before doing the study.
+// The completion URL is only revealed here, so it can't be read before doing the study. Runs a block
+// stopped early (wrong device, stimuli failed to load) end without it.
 runApp.post('/api/runs/:id/finish', (req, res) => {
   const run = ownedRun(req, res);
   if (!run) return;
-  if (!run.finished_at) db.prepare('UPDATE runs SET finished_at = ? WHERE id = ?').run(now(), run.id);
+  const stopped = typeof req.body.stopped === 'string' ? req.body.stopped.slice(0, 40) : null;
+  if (!run.finished_at) db.prepare('UPDATE runs SET finished_at = ?, stopped = ? WHERE id = ?').run(now(), stopped, run.id);
+  if (stopped || run.stopped) return res.json({ redirect: null });
   const link = db.prepare('SELECT recruitment, completion_url FROM links WHERE token = ?').get(run.link_token);
   let redirect = link.completion_url;
   if (redirect && link.recruitment === 'sona') redirect = redirect.replace('XXXX', encodeURIComponent(run.participant_id));

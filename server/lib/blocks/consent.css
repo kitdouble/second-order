@@ -1,0 +1,29 @@
+/* Participant Information Statement layout (src/blocks/consent.js). */
+.pis-container {
+  max-width: 800px;
+  margin: 2rem auto 1rem;
+  padding: 0 1rem;
+  text-align: left;
+  line-height: 1.5;
+}
+.pis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+.pis-header h1 { font-size: 1.6rem; margin: 0 0 0.25rem; }
+.pis-header .pis-title-study { font-size: 1.2rem; font-weight: 600; margin: 0 0 0.75rem; }
+.pis-contact { font-size: 0.9rem; }
+.pis-logo { height: 110px; width: auto; flex-shrink: 0; }
+.pis-container h4 { margin: 1.5rem 0 0.5rem; }
+.pis-keep-note { font-style: italic; }
+.pis-consent { margin-top: 2rem; padding: 1rem; background: #f4f4f4; border-radius: 6px; }
+.pis-footer { margin-top: 1.5rem; font-size: 0.8rem; color: #666666; }
+/* The plugin's Next button, below the statement. */
+#jspsych-html-button-response-stimulus:has(.pis-container) + #jspsych-html-button-response-btngroup { margin-bottom: 3rem; }
+#jspsych-html-button-response-stimulus:has(.pis-container) + #jspsych-html-button-response-btngroup .jspsych-btn { font-size: 1.1rem; padding: 10px 32px; }
+
+@media (max-width: 600px) {
+  .pis-logo { height: 70px; }
+}

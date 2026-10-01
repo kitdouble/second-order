@@ -11,5 +11,5 @@ rsync -az --delete \
 ssh "root@${HOST}" 'cd /opt/second-order \
   && npm ci --omit=dev --no-audit --no-fund \
   && chown -R root:root /opt/second-order && chmod 644 .env \
-  && systemctl restart second-order \
+  && systemctl restart second-order-sim second-order \
   && sleep 1 && systemctl is-active second-order && curl -fsS http://127.0.0.1:3000/api/health && echo'

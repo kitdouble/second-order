@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { db, newId, newToken, now } from './db.js';
 import { config } from './config.js';
 import { compileExperiment } from './compile.js';
+import { currentManifest, fileUrl } from './stimuli.js';
 
 export class StudyError extends Error {}
 
@@ -74,7 +75,7 @@ function runCounts(column, value) {
 
 export function describeStudy(user, studyId, versionNumber) {
   const study = findStudy(user, studyId);
-  const versions = db.prepare('SELECT id, number, notes, packages, created_at FROM study_versions WHERE study_id = ? ORDER BY number').all(study.id);
+  const versions = db.prepare('SELECT id, number, notes, created_at FROM study_versions WHERE study_id = ? ORDER BY number').all(study.id);
   const shown = versions.length ? findVersion(study, versionNumber) : null;
   const links = db.prepare("SELECT * FROM links WHERE study_id = ? AND kind = 'live' ORDER BY created_at").all(study.id);
   return {
@@ -88,6 +89,7 @@ export function describeStudy(user, studyId, versionNumber) {
       version: shown.number,
       preview_url: linkUrl(db.prepare("SELECT * FROM links WHERE version_id = ? AND kind = 'preview'").get(shown.id)),
       packages: JSON.parse(shown.packages),
+      stimuli: Object.keys(JSON.parse(shown.stimuli)),
       code: shown.code,
     }),
   };
@@ -97,7 +99,9 @@ export function describeStudy(user, studyId, versionNumber) {
 
 export async function saveVersion(user, studyId, { code, notes }) {
   const study = findStudy(user, studyId);
-  const compiled = await compileExperiment(code); // throws CompileError with line numbers
+  const stimuli = currentManifest(study.id);
+  const urls = Object.fromEntries(Object.entries(stimuli).map(([name, sha]) => [name, fileUrl(name, sha)]));
+  const compiled = await compileExperiment(code, urls); // throws CompileError with line numbers
 
   const versionId = newId();
   const previewToken = newToken();
@@ -106,10 +110,10 @@ export async function saveVersion(user, studyId, { code, notes }) {
   try {
     number = (db.prepare('SELECT MAX(number) AS n FROM study_versions WHERE study_id = ?').get(study.id).n ?? 0) + 1;
     db.prepare(
-      `INSERT INTO study_versions (id, study_id, number, notes, code, packages, bundle_js, bundle_css, bundle_hash, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO study_versions (id, study_id, number, notes, code, packages, stimuli, bundle_js, bundle_css, bundle_hash, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(versionId, study.id, number, notes?.trim() || null, code, JSON.stringify(compiled.packages),
-      compiled.js, compiled.css, compiled.hash, user.id, now());
+      JSON.stringify(stimuli), compiled.js, compiled.css, compiled.hash, user.id, now());
     db.prepare(
       `INSERT INTO links (token, study_id, version_id, kind, recruitment, created_by, created_at)
        VALUES (?, ?, ?, 'preview', 'none', ?, ?)`
@@ -123,6 +127,7 @@ export async function saveVersion(user, studyId, { code, notes }) {
     version: number,
     preview_url: linkUrl({ token: previewToken, recruitment: 'none' }),
     packages: compiled.packages,
+    stimuli: Object.keys(stimuli).length,
     warnings: compiled.warnings,
   };
 }
