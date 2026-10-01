@@ -234,7 +234,11 @@ function finished(rows, mode, path, items) {
 
 /* ---------- Start ---------- */
 
+// Tell the chat panel the dashboard rendered, and how big it is, so it can tell a blank embed apart.
+const announce = () => toPanel({ type: 'second-order:ready', width: window.innerWidth, height: window.innerHeight });
+
 (async () => {
+  setTimeout(announce, 0);
   let items;
   try {
     // Describe the timeline once, with a throwaway jsPsych instance.

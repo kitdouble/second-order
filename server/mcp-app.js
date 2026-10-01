@@ -39,7 +39,19 @@ export const panelHtml = `<!doctype html>
   <button type="button" data-tab="check" id="tab-check" hidden>Launch check</button>
   <button type="button" data-tab="quality" id="tab-quality" hidden>Quality</button>
 </nav>
-<section class="view active" id="view-try"><iframe id="frame" title="Experiment dashboard" allow="fullscreen; autoplay"></iframe></section>
+<section class="view active" id="view-try">
+  <iframe id="frame" title="Experiment dashboard" allow="fullscreen; autoplay"></iframe>
+  <div class="pad fallback" id="try-fallback" hidden>
+    <h3>Try it</h3>
+    <p id="try-reason"></p>
+    <p class="muted">Open the dashboard fullscreen or in your browser to run the study, from any point.</p>
+    <div class="chips">
+      <button class="btn primary" id="try-full" type="button">Open fullscreen</button>
+      <button class="btn" id="try-open" type="button">Open in browser</button>
+      <button class="btn" id="try-again" type="button">Try again here</button>
+    </div>
+  </div>
+</section>
 <section class="view" id="view-study"></section>
 <section class="view" id="view-sim"></section>
 <section class="view" id="view-check"></section>

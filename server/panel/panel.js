@@ -47,7 +47,12 @@ window.addEventListener('message', (event) => {
 
 function applyContext(context = {}) {
   if (context.theme) document.documentElement.dataset.theme = context.theme;
+  // Inline, fit the dashboard to the height the host allows.
+  const max = context.containerDimensions?.maxHeight ?? context.containerDimensions?.height;
+  if (max) document.documentElement.style.setProperty('--frame-height', `${Math.max(320, Math.min(620, max - 130))}px`);
   if (context.displayMode) {
+    // A dashboard that couldn't show inline usually can once it has room (our button or the host's).
+    if (context.displayMode !== 'inline' && state.study && !$('#try-fallback').hidden) loadFrame();
     document.body.classList.toggle('fullscreen', context.displayMode === 'fullscreen');
     $('#full').textContent = context.displayMode === 'fullscreen' ? 'Exit fullscreen' : 'Fullscreen';
   }
@@ -119,7 +124,7 @@ function render(reloadFrame) {
   $('#open').disabled = false;
   $('#tab-sim').hidden = !state.simulation;
   if (state.simulation) $('#tab-sim .count').textContent = state.simulation.version === study.version ? '' : `v${state.simulation.version}`;
-  if (reloadFrame) $('#frame').src = study.dashboard_url;
+  if (reloadFrame) loadFrame();
 
   $('#tab-check').hidden = !state.check;
   $('#tab-quality').hidden = !state.quality;
@@ -329,6 +334,37 @@ async function switchVersion(number) {
   }
 }
 
+/* ---------- Embedded dashboard (Try it) ---------- */
+
+// Some hosts don't show a nested page inline. The dashboard reports when it has rendered; if it doesn't,
+// or reports no real size, show a card that opens it fullscreen or in the browser instead.
+let readyTimer = null;
+
+function loadFrame() {
+  $('#try-fallback').hidden = true;
+  $('#frame').hidden = false;
+  $('#frame').src = state.study.dashboard_url;
+  clearTimeout(readyTimer);
+  readyTimer = setTimeout(() => showFallback('The dashboard did not load here.'), 6000);
+}
+
+function showFallback(reason) {
+  clearTimeout(readyTimer);
+  $('#frame').hidden = true;
+  $('#try-fallback').hidden = false;
+  $('#try-reason').textContent = reason;
+  sizeChanged();
+}
+
+function dashboardReady({ width, height }) {
+  clearTimeout(readyTimer);
+  if (!(width > 50 && height > 80)) showFallback('There isn\'t room to show the dashboard here.');
+}
+
+$('#try-full').addEventListener('click', () => $('#full').click());
+$('#try-open').addEventListener('click', () => $('#open').click());
+$('#try-again').addEventListener('click', () => state.study && loadFrame());
+
 /* ---------- Dashboard <-> Claude ---------- */
 
 function sendToDashboard(message) {
@@ -344,7 +380,9 @@ async function postToChat(text) {
 const where = () => `${state.study.title} v${state.study.version}`;
 
 function fromDashboard(data) {
-  if (data?.type === 'second-order:download') {
+  if (data?.type === 'second-order:ready') {
+    dashboardReady(data);
+  } else if (data?.type === 'second-order:download') {
     const { filename, mimeType, text } = data;
     request('ui/download-file', { contents: [{ type: 'resource', resource: { uri: `file:///${filename}`, mimeType, text } }] }).catch(() => {});
   } else if (data?.type === 'second-order:feedback' && caps.message) {

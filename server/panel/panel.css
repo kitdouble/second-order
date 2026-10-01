@@ -32,6 +32,11 @@
   box-sizing: border-box;
 }
 
+/* The hidden attribute must win over display rules below (iframe, .feedback, …). */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -153,7 +158,7 @@ select {
 iframe {
   display: block;
   width: 100%;
-  height: 620px;
+  height: var(--frame-height, 620px);
   border: 0;
   background: #fff;
 }
