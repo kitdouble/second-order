@@ -30,7 +30,7 @@ export default function Home({ user }) {
       </div>
       <ul className="connect-steps">
         <li><strong>Claude:</strong> Settings → Connectors → Add custom connector.</li>
-        <li><strong>ChatGPT:</strong> Settings → Apps → Advanced settings → turn on Developer mode, then create an app with this URL.</li>
+        <li><strong>ChatGPT:</strong> Settings → Security and login → turn on Developer mode, then add an app with this URL.</li>
       </ul>
       <button className="sign-out-button" onClick={signOut}>Sign out</button>
     </AuthLayout>
