@@ -1,0 +1,55 @@
+/* Experiments always render light, whatever the participant's system theme. */
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: #fff;
+  color: #000;
+}
+
+body {
+  box-sizing: border-box;
+}
+
+#jspsych-target {
+  height: 100%;
+}
+
+/* Preview banner sits above the experiment rather than over it. */
+body.so-preview {
+  padding-top: 30px;
+}
+
+.so-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 6px 12px;
+  background: #fff4c2;
+  border-bottom: 1px solid #e6d27a;
+  font: 13px/1.4 system-ui, -apple-system, sans-serif;
+  text-align: center;
+}
+
+.so-message {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 20vh 16px 0;
+  font: 18px/1.5 system-ui, -apple-system, sans-serif;
+  text-align: center;
+}
+
+.so-message pre {
+  margin-top: 1rem;
+  text-align: left;
+  font-size: 12px;
+  white-space: pre-wrap;
+}

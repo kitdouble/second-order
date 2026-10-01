@@ -8,9 +8,10 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    // Everything except the front end itself is served by the API.
+    // Everything except the front end itself is served by the API. Keep the Host header: the API
+    // tells the main site from the participant site (RUN_ORIGIN) by host.
     proxy: Object.fromEntries(
-      ['/api', '/mcp', '/.well-known', '/authorize', '/token', '/register', '/revoke'].map((p) => [p, api])
+      ['/api', '/mcp', '/.well-known', '/authorize', '/token', '/register', '/revoke'].map((p) => [p, { target: api, changeOrigin: false }])
     ),
   },
 });

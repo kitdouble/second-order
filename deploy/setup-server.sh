@@ -26,6 +26,7 @@ chmod 700 /var/lib/second-order
 if [ ! -f /opt/second-order/.env ]; then
   cat > /opt/second-order/.env <<ENV
 APP_ORIGIN=https://${DOMAIN}
+RUN_ORIGIN=https://run.${DOMAIN}
 API_PORT=3000
 DB_PATH=/var/lib/second-order/second-order.db
 ENV
@@ -55,7 +56,7 @@ systemctl daemon-reload
 systemctl enable second-order
 
 cat > /etc/caddy/Caddyfile <<CADDY
-${DOMAIN} {
+${DOMAIN}, run.${DOMAIN} {
 	encode gzip
 	header Strict-Transport-Security "max-age=31536000"
 	reverse_proxy 127.0.0.1:3000

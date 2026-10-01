@@ -103,6 +103,70 @@ db.exec(`
     expires_at  INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS oauth_tokens_grant ON oauth_tokens(grant_id);
+
+  /* ---------- Experiments ---------- */
+
+  CREATE TABLE IF NOT EXISTS studies (
+    id          TEXT PRIMARY KEY,           -- readable slug, e.g. stroop-k2f9
+    title       TEXT NOT NULL,
+    description TEXT,
+    owner_id    TEXT NOT NULL REFERENCES users(id),
+    created_at  INTEGER NOT NULL
+  );
+
+  -- Versions are immutable: every save makes a new one, compiled once.
+  CREATE TABLE IF NOT EXISTS study_versions (
+    id          TEXT PRIMARY KEY,
+    study_id    TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
+    number      INTEGER NOT NULL,
+    notes       TEXT,
+    code        TEXT NOT NULL,
+    packages    TEXT NOT NULL,              -- JSON {name: version} actually bundled
+    bundle_js   TEXT NOT NULL,
+    bundle_css  TEXT NOT NULL,
+    bundle_hash TEXT NOT NULL,
+    created_by  TEXT NOT NULL REFERENCES users(id),
+    created_at  INTEGER NOT NULL,
+    UNIQUE (study_id, number)
+  );
+
+  -- A link runs exactly one version. Preview links mark their data as test data.
+  CREATE TABLE IF NOT EXISTS links (
+    token           TEXT PRIMARY KEY,
+    study_id        TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
+    version_id      TEXT NOT NULL REFERENCES study_versions(id),
+    kind            TEXT NOT NULL CHECK (kind IN ('preview', 'live')),
+    recruitment     TEXT NOT NULL CHECK (recruitment IN ('prolific', 'sona', 'lab', 'none')),
+    completion_url  TEXT,
+    label           TEXT,
+    created_by      TEXT NOT NULL REFERENCES users(id),
+    created_at      INTEGER NOT NULL,
+    closed_at       INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS runs (
+    id              TEXT PRIMARY KEY,
+    link_token      TEXT NOT NULL REFERENCES links(token),
+    study_id        TEXT NOT NULL,
+    version_id      TEXT NOT NULL,
+    is_test         INTEGER NOT NULL,
+    key_hash        TEXT NOT NULL,          -- the browser proves it owns the run with this key
+    participant_id  TEXT,                   -- Prolific PID or SONA id
+    params          TEXT NOT NULL,          -- JSON of recruitment URL parameters
+    user_agent      TEXT,
+    started_at      INTEGER NOT NULL,
+    finished_at     INTEGER,
+    bytes           INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS runs_study ON runs(study_id);
+
+  CREATE TABLE IF NOT EXISTS trials (
+    run_id      TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    trial_index INTEGER NOT NULL,
+    data        TEXT NOT NULL,
+    received_at INTEGER NOT NULL,
+    PRIMARY KEY (run_id, trial_index)
+  );
 `);
 
 export const now = () => Date.now();

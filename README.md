@@ -16,8 +16,25 @@ shows the connector URL.
 | Tool | Who | |
 | --- | --- | --- |
 | `whoami` | everyone | the signed-in account |
-| `list_users` | admin | accounts and open invites |
-| `create_invite` | admin | single-use sign-up link |
+| `get_authoring_guide` | everyone | experiment contract, rules, exact package versions |
+| `list_studies` / `get_study` | owner, admin | studies, versions, links, counts, code |
+| `create_study` | everyone | new empty study |
+| `save_version` | owner, admin | compile and save a new immutable version; returns its preview link |
+| `create_participant_link` | owner, admin | Prolific / SONA / lab link pinned to one version |
+| `close_participant_link` | owner, admin | stop accepting participants |
+| `get_data` | owner, admin | trial rows as CSV (test data excluded by default) |
+| `list_users` / `create_invite` | admin | accounts and invites |
+
+## Experiments
+
+Experiments are jsPsych v8 modules (`export default function buildTimeline(jsPsych, context)`), written by
+the assistant and compiled by `server/compile.js` with esbuild against the exact jsPsych packages in
+`package.json`. Each save is a new version whose bundle never changes; participant links pin one version.
+
+Participants use a separate origin (`RUN_ORIGIN`, `run.2ndorder.live`) served by `server/run.js`, with a
+strict CSP (data can only go back to Second Order). `server/runtime/client.js` wraps every experiment: it
+starts the run, saves each trial as it finishes, and redirects to the completion URL, which the server only
+reveals at the end. Bump `version` in `package.json` when the runtime changes; versions record it.
 
 ## Run locally
 

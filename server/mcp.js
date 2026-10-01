@@ -6,11 +6,27 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createInvite, db } from './db.js';
 import { config } from './config.js';
 import { requireMcpAuth } from './oauth.js';
+import { closeLink, createLink, createStudy, describeStudy, exportData, listStudies, saveVersion, StudyError } from './studies.js';
+import { CompileError } from './compile.js';
+import { authoringGuide } from './guide.js';
 
 const text = (value) => ({
   content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
 });
 const userOf = (extra) => extra.authInfo.extra.user;
+
+// Expected failures (bad study id, compile errors) go back to the model as tool errors it can fix.
+function handled(handler) {
+  return async (...callArgs) => {
+    try {
+      return await handler(...callArgs);
+    } catch (err) {
+      if (err instanceof CompileError) return { ...text(`Compile failed, nothing was saved:\n${err.message}`), isError: true };
+      if (err instanceof StudyError) return { ...text(err.message), isError: true };
+      throw err;
+    }
+  };
+}
 
 // Tool callbacks get (args, extra), or just (extra) when the tool takes no input.
 function adminOnly(handler) {
@@ -23,7 +39,13 @@ function adminOnly(handler) {
 function buildServer() {
   const server = new McpServer(
     { name: 'second-order', title: 'Second Order', version: '0.1.0' },
-    { instructions: 'Second Order is an invite-only platform for building and running online behavioural experiments. All work happens through these tools; there is no researcher web interface.' }
+    {
+      instructions:
+        'Second Order is an invite-only platform for building and running online behavioural experiments with jsPsych. ' +
+        'All work happens through these tools; there is no researcher web interface. ' +
+        'Call get_authoring_guide before writing or changing experiment code. ' +
+        'Never claim a study is collecting data unless get_study shows an open participant link with participants.',
+    }
   );
 
   server.registerTool('whoami', {
@@ -64,6 +86,95 @@ function buildServer() {
   }, adminOnly(async ({ name, email, admin }, extra) => {
     const { url } = createInvite({ name, email, role: admin ? 'admin' : 'member', createdBy: userOf(extra).id });
     return text(`Invite for ${name} <${email}>${admin ? ' as admin' : ''}. Single use, expires in ${config.inviteDays} days:\n\n${url}`);
+  }));
+
+  /* ---------- Experiments ---------- */
+
+  server.registerTool('get_authoring_guide', {
+    title: 'Experiment authoring guide',
+    description: 'How to write a Second Order experiment: the module contract, rules, workflow and the exact jsPsych packages available. Read before writing or editing experiment code.',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, async () => text(authoringGuide()));
+
+  server.registerTool('list_studies', {
+    title: 'List studies',
+    description: 'List your studies (admins see everyone\'s) with latest version and participant counts.',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, async (extra) => text(listStudies(userOf(extra))));
+
+  server.registerTool('create_study', {
+    title: 'Create study',
+    description: 'Create a new, empty study. Returns its id. Then write the experiment and save it with save_version.',
+    inputSchema: {
+      title: z.string().min(1).max(120).describe('Researcher-facing title (participants never see it)'),
+      description: z.string().max(2000).optional().describe('What the study is about: design, conditions, measures'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async (args, extra) => text(createStudy(userOf(extra), args))));
+
+  server.registerTool('get_study', {
+    title: 'Get study',
+    description: 'A study\'s versions, participant links and counts, plus the code, packages and preview link of one version (latest by default).',
+    inputSchema: {
+      study_id: z.string().describe('Study id from list_studies or create_study'),
+      version: z.number().int().positive().optional().describe('Version number to show; defaults to the latest'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, version }, extra) => text(describeStudy(userOf(extra), study_id, version))));
+
+  server.registerTool('save_version', {
+    title: 'Save experiment version',
+    description:
+      'Compile and save the complete experiment module as a new immutable version of the study, and return its preview link. ' +
+      'Always send the whole module, not a diff. If compilation fails nothing is saved and the errors are returned. ' +
+      'Follow get_authoring_guide.',
+    inputSchema: {
+      study_id: z.string(),
+      code: z.string().min(1).max(500_000).describe('The full experiment module (ES module, jsPsych v8)'),
+      notes: z.string().max(1000).optional().describe('What changed in this version, for the researcher'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id, code, notes }, extra) => text(await saveVersion(userOf(extra), study_id, { code, notes }))));
+
+  server.registerTool('create_participant_link', {
+    title: 'Create participant link',
+    description:
+      'Create a link for real participants that always runs one fixed version. Returns the URL to paste into Prolific or SONA ' +
+      '(with their placeholders already in it). Creating a link does not recruit anyone: the researcher launches the study on the platform. ' +
+      'Only create one after the researcher has approved the version in preview.',
+    inputSchema: {
+      study_id: z.string(),
+      version: z.number().int().positive().describe('The version participants will get'),
+      recruitment: z.enum(['prolific', 'sona', 'lab', 'none']).describe('Where participants come from; decides ID capture and the end redirect'),
+      completion_url: z.string().optional().describe('Prolific: https://app.prolific.com/submissions/complete?cc=...  SONA: the completion URL with survey_code=XXXX. Not used otherwise.'),
+      label: z.string().max(200).optional().describe('e.g. "Pilot" or "Main sample"'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(createLink(userOf(extra), study_id, args))));
+
+  server.registerTool('close_participant_link', {
+    title: 'Close participant link',
+    description: 'Stop a participant link from accepting new participants. People already part-way through can still finish. Cannot be undone.',
+    inputSchema: { study_id: z.string(), url: z.string().describe('The participant link URL (or its token)') },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, url }, extra) => text(closeLink(userOf(extra), study_id, url))));
+
+  server.registerTool('get_data', {
+    title: 'Get data',
+    description:
+      'Collected trial data as CSV, one row per trial with run, version and participant columns first. ' +
+      'Test (preview) data is excluded unless include_test is true. Participant IDs are pseudonymous platform IDs.',
+    inputSchema: {
+      study_id: z.string(),
+      version: z.number().int().positive().optional(),
+      include_test: z.boolean().default(false),
+      completed_only: z.boolean().default(false).describe('Only participants who reached the end'),
+      max_rows: z.number().int().min(1).max(5000).default(2000),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const result = exportData(userOf(extra), study_id, args);
+    return text(`${result.runs.started} sessions (${result.runs.completed} completed), ${result.rows} rows${result.truncated ? ' (truncated: raise max_rows or filter by version)' : ''}.\n\n${result.csv}`);
   }));
 
   return server;

@@ -5,6 +5,8 @@ export const config = {
   port: Number(process.env.API_PORT || 3000),
   origin,
   mcpUrl: `${origin}/mcp`,
+  // Experiments run on their own origin so participant-facing code can never reach sessions or the API.
+  runOrigin: (process.env.RUN_ORIGIN || 'http://127.0.0.1:3000').replace(/\/$/, ''),
   rpID: process.env.RP_ID || new URL(origin).hostname,
   rpName: 'Second Order',
   dbPath: process.env.DB_PATH || 'data/second-order.db',
