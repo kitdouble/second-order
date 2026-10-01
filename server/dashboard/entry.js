@@ -87,7 +87,7 @@ function header(...extra) {
     el('div', { class: 'db-brand' }, 'Second Order', el('span', {}, 'Dashboard')),
     el('div', { class: 'db-title' },
       el('h1', {}, config.title),
-      el('p', { class: 'db-meta' }, `Version ${config.version}`, config.notes ? ` · ${config.notes}` : '')),
+      el('p', { class: 'db-meta' }, `Live · revision ${config.version}`, config.notes ? ` · ${config.notes}` : '')),
     ...extra);
 }
 
@@ -207,7 +207,7 @@ function describeRun(rows, mode, path, items, stopped) {
 function finished(rows, mode, path, items) {
   const stopped = rows.find((r) => r.stopped)?.stopped;
   toPanel({ type: 'second-order:run', summary: describeRun(rows, mode, path, items, stopped) });
-  const stem = `v${config.version}-${mode}${path ? `-${formatPath(path)}` : ''}`;
+  const stem = `r${config.version}-${mode}${path ? `-${formatPath(path)}` : ''}`;
   const columns = [...new Set(rows.flatMap(Object.keys))];
   const shown = rows.slice(0, 200);
 

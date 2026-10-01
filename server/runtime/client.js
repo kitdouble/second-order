@@ -76,7 +76,7 @@ export async function start(experiment) {
   if (!live) {
     const banner = document.createElement('div');
     banner.className = 'so-banner';
-    banner.textContent = `Preview of version ${config.version}: responses are saved as test data.`;
+    banner.textContent = `Preview (revision ${config.version}): responses are saved as test data.`;
     document.body.prepend(banner);
     document.body.classList.add('so-preview');
   }

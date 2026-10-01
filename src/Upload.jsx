@@ -69,8 +69,8 @@ export default function Upload({ token }) {
         </ul>
       )}
       <p className="login-note upload-summary">
-        {info.files.length} file{info.files.length === 1 ? '' : 's'} in this study ({info.total_mb} MB). When you're done, tell
-        Claude or ChatGPT; it will save a new version that uses them.
+        {info.files.length} file{info.files.length === 1 ? '' : 's'} in this study ({info.total_mb} MB). They're available to the
+        experiment straight away; tell Claude or ChatGPT when you're done.
       </p>
     </AuthLayout>
   );

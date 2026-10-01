@@ -63,13 +63,13 @@ const median = (xs) => {
   return s.length ? (s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : null;
 };
 
-export function qualityReport(user, studyId, { version, include_test = false } = {}) {
+export function qualityReport(user, studyId, { include_test = false } = {}) {
   const study = findStudy(user, studyId);
   const rules = rulesFor(study);
   const runs = db.prepare(
-    `SELECT r.*, v.number AS version, v.code FROM runs r JOIN study_versions v ON v.id = r.version_id
-     WHERE r.study_id = ? ${include_test ? '' : 'AND r.is_test = 0'} ${version ? 'AND v.number = ?' : ''} ORDER BY r.started_at`
-  ).all(study.id, ...(version ? [version] : []));
+    `SELECT r.*, v.number AS revision, v.code FROM runs r JOIN study_versions v ON v.id = r.version_id
+     WHERE r.study_id = ? ${include_test ? '' : 'AND r.is_test = 0'} ORDER BY r.started_at`
+  ).all(study.id);
   if (!runs.length) throw new StudyError(include_test ? 'No sessions yet.' : 'No participant sessions yet. Use include_test: true to look at preview runs.');
 
   const rowsOf = db.prepare('SELECT data FROM trials WHERE run_id = ? ORDER BY trial_index');
@@ -92,10 +92,10 @@ export function qualityReport(user, studyId, { version, include_test = false } =
   for (const s of sessions) for (const r of s.quality.reasons) reasons[r.replace(/\d+%/, 'many')] = (reasons[r.replace(/\d+%/, 'many')] ?? 0) + 1;
 
   const { design } = summarise(kept.map((s) => ({ rows: s.rows })));
-  const status = studyStatus(user, studyId, { version });
+  const status = studyStatus(user, studyId);
 
   return {
-    study: study.id, title: study.title, version: version ?? 'all', include_test,
+    study: study.id, title: study.title, include_test,
     sessions: sessions.length, completed: completed.length, excluded: sessions.length - kept.length, kept: kept.length,
     exclusion_reasons: reasons,
     rules,
@@ -105,7 +105,7 @@ export function qualityReport(user, studyId, { version, include_test = false } =
     },
     dropouts: status.dropouts,
     participants: sessions.slice(-60).reverse().map((s) => ({
-      participant: s.run.participant_id ? `${s.run.participant_id.slice(0, 4)}…` : null, run_id: s.run.id, version: s.run.version,
+      participant: s.run.participant_id ? `${s.run.participant_id.slice(0, 4)}…` : null, run_id: s.run.id, revision: s.run.revision,
       started: iso(s.run.started_at), ...s.quality,
     })),
     responses_kept_participants: design,

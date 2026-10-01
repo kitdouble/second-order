@@ -7,11 +7,11 @@ import { exportData, findStudy, iso, StudyError } from './studies.js';
 
 const DOWNLOAD_MINUTES = 60;
 
-export function createDownloadLink(user, studyId, { format = 'csv', version, include_test = false, completed_only = false, exclusions = 'none' } = {}) {
+export function createDownloadLink(user, studyId, { format = 'csv', include_test = false, completed_only = false, exclusions = 'none' } = {}) {
   const study = findStudy(user, studyId);
   const token = newToken();
   db.prepare('INSERT INTO download_links (token_hash, study_id, user_id, options, expires_at) VALUES (?, ?, ?, ?, ?)')
-    .run(hash(token), study.id, user.id, JSON.stringify({ format, version, include_test, completed_only, exclusions }), now() + DOWNLOAD_MINUTES * 60 * 1000);
+    .run(hash(token), study.id, user.id, JSON.stringify({ format, include_test, completed_only, exclusions }), now() + DOWNLOAD_MINUTES * 60 * 1000);
   return {
     url: `${config.origin}/api/downloads/${token}`,
     expires_in_minutes: DOWNLOAD_MINUTES,
@@ -38,7 +38,7 @@ downloads.get('/:token', (req, res) => {
   }
   const data = exportData(user, study.id, { ...options, max_rows: Infinity });
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-  const name = `${study.id}${options.version ? `-v${options.version}` : ''}${options.include_test ? '-with-test' : ''}-${stamp}`;
+  const name = `${study.id}${options.include_test ? '-with-test' : ''}-${stamp}`;
   res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   if (options.format === 'json') {
     res.attachment(`${name}.json`).type('application/json').send(JSON.stringify(data.records, null, 1));

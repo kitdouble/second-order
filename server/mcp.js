@@ -6,7 +6,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createInvite, db } from './db.js';
 import { config } from './config.js';
 import { requireMcpAuth } from './oauth.js';
-import { closeLink, createLink, createStudy, describeStudy, exportData, listMembers, listStudies, panelState, removeMember, saveVersion, shareStudy, StudyError } from './studies.js';
+import { closeLink, createLink, createStudy, describeStudy, exportData, listMembers, listStudies, panelState, removeMember, shareStudy, StudyError } from './studies.js';
+import { collectGarbage, deleteSavedVersion, restoreVersion, saveVersion, storageReport, updateExperiment } from './live.js';
 import { CompileError } from './compile.js';
 import { authoringGuide } from './guide.js';
 import { addStimulus, createUploadLink, importFromUrl, listStimuli, removeStimulus } from './stimuli.js';
@@ -53,7 +54,9 @@ function buildServer() {
         'Call get_authoring_guide before writing or changing experiment code. ' +
         'This is a rebuilt Second Order (October 2026): experiments are jsPsych modules, not YAML specs. Tools from the earlier ' +
         'version (guide/block catalogue via get, edit_spec, check qa/simulate/preview, review, prolific) no longer exist; ignore any ' +
-        'memory of them. Workflow: get_authoring_guide, create_study, save_version, simulate, show_dashboard, check_launch, ' +
+        'memory of them. Each study has one live experiment: update_experiment changes it immediately (open participant links ' +
+        'included); save_version stores a snapshot only when the researcher asks. Workflow: get_authoring_guide, create_study, ' +
+        'update_experiment, simulate, show_dashboard, check_launch, ' +
         'create_participant_link, study_status, quality_report, get_data. ' +
         'Never claim a study is collecting data unless get_study shows an open participant link with participants.',
     }
@@ -109,13 +112,13 @@ function buildServer() {
 
   server.registerTool('list_studies', {
     title: 'List studies',
-    description: 'List your studies and those shared with you (admins see everyone\'s), with your role, latest version and participant counts.',
+    description: 'List your studies and those shared with you (admins see everyone\'s), with your role and participant counts.',
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, async (extra) => text(listStudies(userOf(extra))));
 
   server.registerTool('create_study', {
     title: 'Create study',
-    description: 'Create a new, empty study. Returns its id. Then write the experiment and save it with save_version.',
+    description: 'Create a new, empty study. Returns its id. Then write the experiment with update_experiment.',
     inputSchema: {
       title: z.string().min(1).max(120).describe('Researcher-facing title (participants never see it)'),
       description: z.string().max(2000).optional().describe('What the study is about: design, conditions, measures'),
@@ -125,37 +128,73 @@ function buildServer() {
 
   server.registerTool('get_study', {
     title: 'Get study',
-    description: 'A study\'s versions, participant links and counts, plus the code, packages and preview link of one version (latest by default).',
+    description: 'A study\'s live experiment (code, packages, stimuli, preview and dashboard links, revision), participant links and counts, and saved versions. With version, shows that saved version\'s code instead.',
     inputSchema: {
       study_id: z.string().describe('Study id from list_studies or create_study'),
-      version: z.number().int().positive().optional().describe('Version number to show; defaults to the latest'),
+      version: z.number().int().positive().optional().describe('A saved version to show the code of; omit for the live experiment'),
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, handled(async ({ study_id, version }, extra) => text(describeStudy(userOf(extra), study_id, version))));
 
-  server.registerTool('save_version', {
-    title: 'Save experiment version',
+  server.registerTool('update_experiment', {
+    title: 'Update experiment',
     description:
-      'Compile and save the complete experiment module as a new immutable version of the study, and return its preview link. ' +
-      'Always send the whole module, not a diff. If compilation fails nothing is saved and the errors are returned. ' +
-      'Follow get_authoring_guide.',
+      'Compile the complete experiment module and make it the study\'s live experiment, immediately, for everyone: preview, dashboard ' +
+      'and open participant links (people part-way through keep their page; a reload restarts them on the new one). Always send the ' +
+      'whole module, not a diff. If compilation fails nothing changes and the errors are returned. Follow get_authoring_guide. ' +
+      'Before a big change while participants are taking part, offer to save_version first.',
     inputSchema: {
       study_id: z.string(),
       code: z.string().min(1).max(500_000).describe('The full experiment module (ES module, jsPsych v8)'),
-      notes: z.string().max(1000).optional().describe('What changed in this version, for the researcher'),
+      notes: z.string().max(1000).optional().describe('What changed, for the record'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, handled(async ({ study_id, code, notes }, extra) => text(await saveVersion(userOf(extra), study_id, { code, notes }))));
+  }, handled(async ({ study_id, code, notes }, extra) => text(await updateExperiment(userOf(extra), study_id, { code, notes }))));
+
+  server.registerTool('save_version', {
+    title: 'Save a version',
+    description:
+      'Only when the researcher asks: store a named snapshot of the live experiment (code and its stimulus files) in the study\'s ' +
+      'version history, to go back to later with restore_version. Saved versions keep their files until deleted.',
+    inputSchema: {
+      study_id: z.string(),
+      name: z.string().min(1).max(120).describe('e.g. "Pilot", "Before adding feedback"'),
+      notes: z.string().max(1000).optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(saveVersion(userOf(extra), study_id, args))));
+
+  server.registerTool('restore_version', {
+    title: 'Restore a saved version',
+    description:
+      'Make a saved version the live experiment again: its code and exactly its stimulus files, live immediately. Replaces the current ' +
+      'experiment and files, so first offer to save the current one, and only proceed after the researcher confirms.',
+    inputSchema: { study_id: z.string(), version: z.number().int().positive(), researcher_confirmed: z.boolean() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(await restoreVersion(userOf(extra), study_id, args))));
+
+  server.registerTool('delete_version', {
+    title: 'Delete a saved version',
+    description: 'Owner only. Delete a saved version from the history, freeing stimulus files nothing else uses. Cannot be undone; confirm with the researcher first.',
+    inputSchema: { study_id: z.string(), version: z.number().int().positive(), researcher_confirmed: z.boolean() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(deleteSavedVersion(userOf(extra), study_id, args))));
+
+  server.registerTool('storage_report', {
+    title: 'Storage report',
+    description: 'How much stimulus storage the live experiment and each saved version use, and how much deleting a saved version would free.',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async ({ study_id }, extra) => text(storageReport(userOf(extra), study_id))));
 
   server.registerTool('create_participant_link', {
     title: 'Create participant link',
     description:
-      'Create a link for real participants that always runs one fixed version. Returns the URL to paste into Prolific or SONA ' +
+      'Create a link for real participants. It runs the study\'s live experiment, including later updates. Returns the URL to paste into Prolific or SONA ' +
       '(with their placeholders already in it). Creating a link does not recruit anyone: the researcher launches the study on the platform. ' +
-      'Only create one after the researcher has approved the version in preview.',
+      'Only create one after the researcher has tried the experiment and check_launch has no fails.',
     inputSchema: {
       study_id: z.string(),
-      version: z.number().int().positive().describe('The version participants will get'),
       recruitment: z.enum(['prolific', 'sona', 'lab', 'none']).describe('Where participants come from; decides ID capture and the end redirect'),
       completion_url: z.string().optional().describe('Prolific: https://app.prolific.com/submissions/complete?cc=...  SONA: the completion URL with survey_code=XXXX. Not used otherwise.'),
       label: z.string().max(200).optional().describe('e.g. "Pilot" or "Main sample"'),
@@ -173,12 +212,11 @@ function buildServer() {
   server.registerTool('get_data', {
     title: 'Get data',
     description:
-      'Collected trial data as CSV, one row per trial with run, version, participant and run_status (completed / stopped / incomplete) columns first. ' +
+      'Collected trial data as CSV, one row per trial with run, revision (which code it ran), participant and run_status (completed / stopped / incomplete) columns first. ' +
       'Rows are capped; for the full file, or to keep data out of the chat, use create_download_link. ' +
       'Test (preview) data is excluded unless include_test is true. Participant IDs are pseudonymous platform IDs.',
     inputSchema: {
       study_id: z.string(),
-      version: z.number().int().positive().optional(),
       include_test: z.boolean().default(false),
       completed_only: z.boolean().default(false).describe('Only participants who reached the end'),
       exclusions: z.enum(['none', 'mark', 'drop']).default('none').describe('Apply the study\'s exclusion rules (set_exclusion_rules)'),
@@ -187,19 +225,18 @@ function buildServer() {
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, handled(async ({ study_id, ...args }, extra) => {
     const result = exportData(userOf(extra), study_id, args);
-    return text(`${result.runs.started} sessions (${result.runs.completed} completed), ${result.rows} rows${result.truncated ? ' (truncated: raise max_rows or filter by version)' : ''}.\n\n${result.csv}`);
+    return text(`${result.runs.started} sessions (${result.runs.completed} completed), ${result.rows} rows${result.truncated ? ' (truncated: raise max_rows, or use create_download_link)' : ''}.\n\n${result.csv}`);
   }));
 
   server.registerTool('simulate', {
     title: 'Simulate participants',
     description:
-      'Run simulated participants through a saved version (jsPsych data-only simulation in a sandboxed simulated browser) and ' +
+      'Run simulated participants through the live experiment (jsPsych data-only simulation in a sandboxed simulated browser) and ' +
       'summarise the data: per-participant success/errors, columns, value counts (e.g. to check conditions and counterbalancing) and the ' +
-      'first participant\'s rows. Use after every save_version, before showing the researcher the dashboard. Nothing is saved. ' +
+      'first participant\'s rows. Use after every update_experiment, before showing the researcher the dashboard. Nothing is saved. ' +
       'Where supported, the researcher sees the results as a panel in the chat.',
     inputSchema: {
       study_id: z.string(),
-      version: z.number().int().positive().optional().describe('Defaults to the latest'),
       participants: z.number().int().min(1).max(20).default(3),
       recruitment: z.enum(['prolific', 'sona', 'lab', 'none']).default('prolific').describe('Which version of the standard blocks to run'),
       simulation_options: z.record(z.string(), z.any()).optional().describe('Passed to jsPsych.simulate, e.g. {"default": {"data": {"rt": 600}}}'),
@@ -210,7 +247,7 @@ function buildServer() {
     const simulation = await simulate(userOf(extra), study_id, args);
     return {
       ...text(simulation),
-      structuredContent: { view: 'simulation', simulation, study: panelState(userOf(extra), study_id, simulation.version) },
+      structuredContent: { view: 'simulation', simulation, study: panelState(userOf(extra), study_id) },
     };
   }));
 
@@ -225,20 +262,17 @@ function buildServer() {
   server.registerTool('show_dashboard', {
     title: 'Show dashboard',
     description:
-      'Show the researcher a version inside the chat where supported: its dashboard (timeline; run all, from any item or only one item; ' +
-      'the recorded data with downloads; runs save nothing), the study\'s participant links and counts, versions and stimuli. ' +
-      'The researcher can send feedback to the chat from it. Use after save_version + simulate. Always also give the dashboard_url, ' +
+      'Show the researcher the live experiment inside the chat where supported: its dashboard (timeline; run all, from any item or only one item; ' +
+      'the recorded data with downloads; runs save nothing), the study\'s participant links and counts, saved versions and stimuli. ' +
+      'The researcher can send feedback to the chat from it. Use after update_experiment + simulate. Always also give the dashboard_url, ' +
       'in case the panel does not appear.',
-    inputSchema: {
-      study_id: z.string(),
-      version: z.number().int().positive().optional().describe('Defaults to the latest'),
-    },
+    inputSchema: { study_id: z.string() },
     annotations: { readOnlyHint: true, openWorldHint: false },
     _meta: panelToolMeta,
-  }, handled(async ({ study_id, version }, extra) => {
-    const study = panelState(userOf(extra), study_id, version);
+  }, handled(async ({ study_id }, extra) => {
+    const study = panelState(userOf(extra), study_id);
     return {
-      content: [{ type: 'text', text: `Dashboard for ${study.title}, version ${study.version}: ${study.dashboard_url}\nFull participant preview (saves test data): ${study.preview_url}` }],
+      content: [{ type: 'text', text: `Dashboard for ${study.title} (live, revision ${study.revision}): ${study.dashboard_url}\nFull participant preview (saves test data): ${study.preview_url}` }],
       structuredContent: { view: 'dashboard', study },
     };
   }));
@@ -251,20 +285,19 @@ function buildServer() {
       'How a study is going: per participant link, started / completed / in progress / abandoned / stopped early, completion rate, ' +
       'durations (median, quartiles), where participants who did not finish left off, errors from participants\' browsers (grouped, with ' +
       'trials and browsers), browsers used, recent sessions, and the same for preview (test) runs. Check it regularly while collecting data.',
-    inputSchema: { study_id: z.string(), version: z.number().int().positive().optional() },
+    inputSchema: { study_id: z.string() },
     annotations: { readOnlyHint: true, openWorldHint: false },
-  }, handled(async ({ study_id, version }, extra) => text(studyStatus(userOf(extra), study_id, { version }))));
+  }, handled(async ({ study_id }, extra) => text(studyStatus(userOf(extra), study_id))));
 
   server.registerTool('check_launch', {
     title: 'Check launch readiness',
     description:
-      'Before creating a participant link: simulates the version and checks consent and debrief, stated length against measured completion ' +
+      'Before creating a participant link: simulates the live experiment and checks consent and debrief, stated length against measured completion ' +
       'times, that someone has completed the preview, device check, preloading and stimulus size, balanced assignment, attention checks, ' +
       'columns the analysis needs, the completion URL and other open links. Returns pass / warn / fail per check. Fix every fail; go ' +
       'through warnings with the researcher.',
     inputSchema: {
       study_id: z.string(),
-      version: z.number().int().positive().optional(),
       recruitment: z.enum(['prolific', 'sona', 'lab', 'none']).default('prolific'),
       completion_url: z.string().optional(),
       required_columns: z.array(z.string()).default([]).describe('Data columns the planned analysis needs, e.g. ["condition", "correct", "rt"]'),
@@ -273,7 +306,7 @@ function buildServer() {
     _meta: panelToolMeta,
   }, handled(async ({ study_id, ...args }, extra) => {
     const check = await checkLaunch(userOf(extra), study_id, args);
-    return { ...text(check), structuredContent: { view: 'check', check, study: panelState(userOf(extra), study_id, check.version) } };
+    return { ...text(check), structuredContent: { view: 'check', check, study: panelState(userOf(extra), study_id) } };
   }));
 
   server.registerTool('quality_report', {
@@ -285,7 +318,6 @@ function buildServer() {
       'Never deletes anything.',
     inputSchema: {
       study_id: z.string(),
-      version: z.number().int().positive().optional(),
       include_test: z.boolean().default(false).describe('Include preview (test) sessions, e.g. before any real pilot'),
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
@@ -339,8 +371,8 @@ function buildServer() {
       'Add a new version of a consent or debrief text, or a new document for another protocol. These texts are ethics-approved: only call ' +
       'this when the researcher has explicitly asked for this change, after showing them the exact new wording (or the precise changes) ' +
       'and getting their explicit confirmation, and set researcher_confirmed only then. Never change wording on your own initiative or ' +
-      'to fix style. Give each new text its own form_label (approved version and date), which is recorded in the data. Studies use it from ' +
-      'their next saved version; running versions keep their text.',
+      'to fix style. Give each new text its own form_label (approved version and date), which is recorded in the data. Live experiments ' +
+      'using the document pick it up straight away (they rebuild on next load).',
     inputSchema: {
       document: z.string().describe('Document id, e.g. "hrec-2022-796" or a new one like "hrec-2025-123"'),
       kind: z.enum(['consent', 'debrief']),
@@ -358,7 +390,7 @@ function buildServer() {
 
   server.registerTool('share_study', {
     title: 'Share study',
-    description: 'Owner only. Give another Second Order account access to a study: "editor" (change versions, links, stimuli, rules) or ' +
+    description: 'Owner only. Give another Second Order account access to a study: "editor" (change the experiment, links, stimuli, rules) or ' +
       '"viewer" (read, simulate and see data). Sharing again changes their role. They need an account (an admin can create_invite).',
     inputSchema: { study_id: z.string(), email: z.string().email(), role: z.enum(['editor', 'viewer']) },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -386,7 +418,6 @@ function buildServer() {
     inputSchema: {
       study_id: z.string(),
       format: z.enum(['csv', 'json']).default('csv'),
-      version: z.number().int().positive().optional(),
       include_test: z.boolean().default(false),
       completed_only: z.boolean().default(false),
       exclusions: z.enum(['none', 'mark', 'drop']).default('none').describe('Apply the study\'s exclusion rules: mark adds excluded / exclusion_reasons columns, drop leaves excluded sessions out'),
@@ -428,7 +459,7 @@ function buildServer() {
 
   server.registerTool('create_upload_link', {
     title: 'Create upload link',
-    description: 'A link (valid 1 hour) to a page where the researcher can drag in stimulus files from their computer. Use for files the researcher has; ask them to tell you when they are done, then list_stimuli and save a new version.',
+    description: 'A link (valid 1 hour) to a page where the researcher can drag in stimulus files from their computer. Use for files the researcher has; ask them to tell you when they are done, then list_stimuli. New files are live straight away.',
     inputSchema: { study_id: z.string() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, handled(async ({ study_id }, extra) => text(createUploadLink(userOf(extra), study_id))));
@@ -457,11 +488,21 @@ function buildServer() {
   }, handled(async ({ study_id, ...args }, extra) => text(await importFromUrl(userOf(extra), study_id, args))));
 
   server.registerTool('remove_stimulus', {
-    title: 'Remove stimulus',
-    description: 'Remove a file from the study\'s current stimuli. Saved versions keep their copy.',
-    inputSchema: { study_id: z.string(), name: z.string() },
+    title: 'Remove stimuli',
+    description:
+      'Remove files from the study\'s stimuli: one name, a list of names, or a whole folder. The live experiment stops using them ' +
+      'straight away, and they are deleted from the server unless a saved version keeps them.',
+    inputSchema: {
+      study_id: z.string(),
+      name: z.string().optional(),
+      names: z.array(z.string()).max(10_000).optional(),
+      folder: z.string().optional().describe('Remove every file in this folder (and its subfolders), e.g. "iaps"'),
+    },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  }, handled(async ({ study_id, name }, extra) => text(removeStimulus(userOf(extra), study_id, name))));
+  }, handled(async ({ study_id, ...which }, extra) => {
+    const removed = removeStimulus(userOf(extra), study_id, which);
+    return text({ ...removed, ...collectGarbage() });
+  }));
 
   return server;
 }

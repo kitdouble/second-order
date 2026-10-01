@@ -28,7 +28,6 @@ export const panelHtml = `<!doctype html>
 <div class="bar">
   <span class="brand">Second Order</span>
   <span class="title" id="title">Loading…</span>
-  <select id="version" aria-label="Version" disabled></select>
   <button class="btn" id="full" type="button">Fullscreen</button>
   <button class="btn" id="open" type="button" disabled>Open in browser</button>
 </div>

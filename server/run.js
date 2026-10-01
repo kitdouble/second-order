@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { db, hash, newId, newToken, now } from './db.js';
 import { FILES_DIR, MIME, fileUrl } from './stimuli.js';
 import { compileDashboard, RUNTIME_VERSION } from './compile.js';
+import { currentRevision, ensureCurrent } from './live.js';
 import { documentSnapshot } from './documents.js';
 
 const MAX_TRIAL_BYTES = 5 * 1024 * 1024; // audio/video/sketchpad responses can be large
@@ -45,15 +46,22 @@ runApp.use((_req, res, next) => {
   next();
 });
 
-runApp.get('/s/:token', (req, res) => {
-  const link = db.prepare(
-    `SELECT l.*, v.number, v.bundle_hash, v.id AS vid FROM links l JOIN study_versions v ON v.id = l.version_id WHERE l.token = ?`
-  ).get(req.params.token);
+// Every link runs its study's live experiment (rebuilt first if the study's stimuli changed).
+runApp.get('/s/:token', async (req, res) => {
+  const link = db.prepare('SELECT * FROM links WHERE token = ?').get(req.params.token);
   if (!link) return res.status(404).type('html').send(page('<p>This study link is not valid.</p>'));
   if (link.closed_at) return res.status(410).type('html').send(page('<p>This study is closed. Thank you for your interest.</p>'));
+  let revision;
+  try {
+    revision = await ensureCurrent(link.study_id);
+  } catch (err) {
+    console.error(`Rebuild failed for ${link.study_id}:`, err.message);
+    return res.status(500).type('html').send(page('<p>This study can\'t be shown right now. Please try again later.</p>'));
+  }
+  if (!revision) return res.status(404).type('html').send(page('<p>This study is not ready yet.</p>'));
 
-  const config = JSON.stringify({ token: link.token, mode: link.kind, recruitment: link.recruitment, version: link.number }).replace(/</g, '\\u003c');
-  const asset = `/v/${link.vid}.${link.bundle_hash}`;
+  const config = JSON.stringify({ token: link.token, mode: link.kind, recruitment: link.recruitment, version: revision.number }).replace(/</g, '\\u003c');
+  const asset = `/v/${revision.id}.${revision.bundle_hash}`;
   res.type('html').send(page('', `
     <link rel="stylesheet" href="${asset}.css">
     <script type="application/json" id="so-config">${config}</script>
@@ -76,22 +84,22 @@ function page(body, head = '', title = 'Research study') {
 </html>`;
 }
 
-// The researcher dashboard for a version, reached with the version's preview token. It may be framed
-// (Claude and ChatGPT show it inside the chat); it changes nothing and saves nothing.
+// The researcher dashboard for the live experiment, reached with the study's preview token. It may be
+// framed (Claude and ChatGPT show it inside the chat); it changes nothing and saves nothing.
 runApp.get('/d/:token', async (req, res) => {
   res.set('Content-Security-Policy', CSP.replace("frame-ancestors 'none'", 'frame-ancestors *'));
-  const row = db.prepare(
-    `SELECT v.*, s.title FROM links l JOIN study_versions v ON v.id = l.version_id JOIN studies s ON s.id = v.study_id
-     WHERE l.token = ? AND l.kind = 'preview'`
-  ).get(req.params.token);
-  if (!row) return res.status(404).type('html').send(page('<p>This dashboard link is not valid.</p>'));
+  const link = db.prepare("SELECT l.study_id, s.title FROM links l JOIN studies s ON s.id = l.study_id WHERE l.token = ? AND l.kind = 'preview'").get(req.params.token);
+  if (!link) return res.status(404).type('html').send(page('<p>This dashboard link is not valid.</p>'));
+  const current = await ensureCurrent(link.study_id);
+  if (!current) return res.status(404).type('html').send(page('<p>This study has no experiment yet.</p>'));
+  const row = { ...db.prepare('SELECT * FROM study_versions WHERE id = ?').get(current.id), title: link.title };
 
   let { dash_hash: hash } = row;
   if (!row.dash_js || row.dash_build !== RUNTIME_VERSION) {
     const stimuli = JSON.parse(row.stimuli);
     const manifest = Object.fromEntries(Object.entries(stimuli).map(([name, sha]) => [name, fileUrl(name, sha)]));
     try {
-      const built = await compileDashboard(row.code, manifest, row.documents ? JSON.parse(row.documents) : documentSnapshot(row.created_at));
+      const built = await compileDashboard(row.code, manifest, row.documents ? JSON.parse(row.documents) : documentSnapshot());
       db.prepare('UPDATE study_versions SET dash_js = ?, dash_css = ?, dash_hash = ?, dash_build = ? WHERE id = ?')
         .run(built.js, built.css, built.hash, RUNTIME_VERSION, row.id);
       hash = built.hash;
@@ -125,7 +133,7 @@ runApp.get('/v/:file', (req, res) => {
   const m = req.params.file.match(/^([0-9a-f-]{36})\.([0-9a-f]{16})\.(js|css)$/);
   if (!m) return res.sendStatus(404);
   const v = db.prepare('SELECT bundle_js, bundle_css, bundle_hash FROM study_versions WHERE id = ?').get(m[1]);
-  if (!v || v.bundle_hash !== m[2]) return res.sendStatus(404);
+  if (!v?.bundle_js || v.bundle_hash !== m[2]) return res.sendStatus(404); // only the live revision keeps its bundle
   res.set('Cache-Control', 'public, max-age=31536000, immutable')
     .type(m[3] === 'js' ? 'application/javascript' : 'text/css')
     .send(m[3] === 'js' ? v.bundle_js : v.bundle_css);
@@ -154,7 +162,7 @@ const ACTIVE_WINDOW = 30 * 60 * 1000;      // unfinished runs count towards bala
 
 const newSeed = () => randomBytes(8).toString('hex');
 
-function startRun(link, { participantId, params, userAgent }) {
+function startRun(link, { participantId, params, userAgent, revisionId }) {
   const id = newId();
   const key = newToken();
   const resumeToken = link.kind === 'live' ? newToken() : null;
@@ -163,7 +171,7 @@ function startRun(link, { participantId, params, userAgent }) {
     `INSERT INTO runs (id, link_token, study_id, version_id, is_test, key_hash, participant_id, params, user_agent, started_at,
                        last_seen_at, seed, resume_hash)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, link.token, link.study_id, link.version_id, link.kind === 'preview' ? 1 : 0, hash(key), participantId,
+  ).run(id, link.token, link.study_id, revisionId, link.kind === 'preview' ? 1 : 0, hash(key), participantId,
     JSON.stringify(params), userAgent, now(), now(), seed, resumeToken && hash(resumeToken));
   return { id, key, seed, attempt: 1, resume_token: resumeToken, resume: null };
 }
@@ -199,7 +207,9 @@ runApp.post('/api/runs', (req, res) => {
   const params = Object.fromEntries(rules.keep.filter((k) => typeof given[k] === 'string').map((k) => [k, given[k].slice(0, 200)]));
   const participantId = rules.id ? params[rules.id] : null;
   const userAgent = String(req.get('user-agent') ?? '').slice(0, 300);
-  if (link.kind === 'preview') return res.json(startRun(link, { participantId, params, userAgent }));
+  const revisionId = currentRevision(link.study_id)?.id;
+  if (!revisionId) return fail(res, 404, 'This study is not ready yet.');
+  if (link.kind === 'preview') return res.json(startRun(link, { participantId, params, userAgent, revisionId }));
 
   if (rules.id && (!participantId || participantId.includes('%'))) {
     return fail(res, 400, link.recruitment === 'prolific' ? 'Please open this study from Prolific.' : 'Please open this study from SONA.');
@@ -221,9 +231,11 @@ runApp.post('/api/runs', (req, res) => {
     ?? (participantId && db.prepare(
       'SELECT * FROM runs WHERE participant_id = ? AND link_token = ? AND finished_at IS NULL AND started_at > ? ORDER BY started_at DESC LIMIT 1'
     ).get(participantId, link.token, now() - RESUME_WINDOW));
-  if (unfinished && (!participantId || unfinished.participant_id === participantId)) return res.json(resumeRun(unfinished));
-
-  res.json(startRun(link, { participantId, params, userAgent }));
+  // Resume only into the same experiment: after an update, block positions may no longer match.
+  if (unfinished && (!participantId || unfinished.participant_id === participantId) && unfinished.version_id === revisionId) {
+    return res.json(resumeRun(unfinished));
+  }
+  res.json(startRun(link, { participantId, params, userAgent, revisionId }));
 });
 
 function ownedRun(req, res) {

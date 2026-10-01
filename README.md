@@ -19,7 +19,9 @@ shows the connector URL.
 | `get_authoring_guide` | everyone | experiment contract, rules, exact package versions |
 | `list_studies` / `get_study` | owner, admin | studies, versions, links, counts, code |
 | `create_study` | everyone | new empty study |
-| `save_version` | owner, admin | compile and save a new immutable version; returns its preview link |
+| `update_experiment` | owner, admin, editor | compile and make the experiment live (previews and participant links) |
+| `save_version` / `restore_version` / `delete_version` | editor (delete: owner) | named snapshots, only when asked |
+| `storage_report` | viewer | stimulus storage of the live experiment and saved versions |
 | `simulate` | owner, admin | run simulated participants (sandboxed) and summarise their data |
 | `show_dashboard` | owner, admin | in-chat panel: dashboard, study overview (links, counts, versions, stimuli) |
 | `check_launch` | owner, admin | simulate + pre-launch checklist (pass / warn / fail), shown in the panel |
@@ -41,7 +43,11 @@ shows the connector URL.
 
 Experiments are jsPsych v8 modules (`export default function buildTimeline(jsPsych, context)`), written by
 the assistant and compiled by `server/compile.js` with esbuild against the exact jsPsych packages in
-`package.json`. Each save is a new version whose bundle never changes; participant links pin one version.
+`package.json`. Each study has one live experiment (`server/live.js`): updates go live immediately for previews
+and participant links, and are recorded as internal revisions (every data row has `revision`). When stimuli or
+consent texts change, the live experiment is rebuilt on its next load. Saved versions are snapshots kept only
+when the researcher asks; stimulus files are deleted once neither the live experiment nor a saved version uses
+them (hourly, and right after removals).
 
 Experiments can `import { consent, deviceCheck, demographics, fullscreen, preload, debrief, stimulus } from
 "second-order"` (`server/lib/`): the lab's standard blocks, ported from the Meta Lab jsPsych kit. Consent and
@@ -51,8 +57,7 @@ it was saved with.
 
 Access per study: owner (and admins), editor, viewer (`study_members`).
 
-Stimuli are stored once by SHA-256 in `<data dir>/files`; each version records the `{name: hash}` set it was
-saved with, so replacing a file never changes a saved version.
+Stimuli are stored once by SHA-256 in `<data dir>/files`, shared between studies and saved versions.
 
 `simulate` runs jsPsych's data-only simulation in jsdom, one participant per child process under Node's
 permission model (`server/sim/`). In production those processes belong to the `second-order-sim` service:

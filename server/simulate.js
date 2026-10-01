@@ -1,4 +1,4 @@
-// Runs simulated participants through a saved version and summarises the data for the assistant.
+// Runs simulated participants through the live experiment and summarises the data for the assistant.
 import { request } from 'node:http';
 import { db } from './db.js';
 import { runLocally } from './sim/sandbox.js';
@@ -6,6 +6,7 @@ import { compileSimulation } from './compile.js';
 import { findStudy, StudyError } from './studies.js';
 import { fileUrl } from './stimuli.js';
 import { documentSnapshot } from './documents.js';
+import { ensureCurrent } from './live.js';
 
 /* ---------- Running one participant ---------- */
 
@@ -69,12 +70,10 @@ export function summarise(runs) {
   return { columns, design, technical };
 }
 
-export async function simulate(user, studyId, { version, participants = 3, recruitment = 'prolific', simulation_options = {} } = {}) {
+export async function simulate(user, studyId, { participants = 3, recruitment = 'prolific', simulation_options = {} } = {}) {
   const study = findStudy(user, studyId);
-  const v = version == null
-    ? db.prepare('SELECT * FROM study_versions WHERE study_id = ? ORDER BY number DESC LIMIT 1').get(study.id)
-    : db.prepare('SELECT * FROM study_versions WHERE study_id = ? AND number = ?').get(study.id, version);
-  if (!v) throw new StudyError(version == null ? 'This study has no versions yet.' : `Version ${version} does not exist.`);
+  const v = await ensureCurrent(study.id); // the live experiment, with the study's current stimuli
+  if (!v) throw new StudyError('This study has no experiment yet. Write it with update_experiment.');
 
   const manifest = Object.fromEntries(Object.entries(JSON.parse(v.stimuli)).map(([name, sha]) => [name, fileUrl(name, sha)]));
   const bundle = await compileSimulation(v.code, manifest, v.documents ? JSON.parse(v.documents) : documentSnapshot(v.created_at));
@@ -94,7 +93,7 @@ export async function simulate(user, studyId, { version, participants = 3, recru
     const sample = [firstColumns.join(','), ...first.slice(0, 150).map((r) => firstColumns.map((c) => csvCell(r[c])).join(','))].join('\n');
 
     return {
-      version: v.number,
+      revision: v.number,
       recruitment,
       participants: runs.map((r, i) => ({
         participant: i + 1,

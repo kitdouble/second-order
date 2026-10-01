@@ -1,7 +1,7 @@
 // In-chat panel (MCP App, protocol 2026-01-26) for show_dashboard and simulate.
 //
-//   Try it      the version's dashboard (run origin), embedded
-//   Study       participant links and counts, versions (switchable), the version's stimuli
+//   Try it      the live experiment's dashboard (run origin), embedded
+//   Study       participant status, links, the live experiment and saved versions, stimuli
 //   Simulation  the last simulate result: participant outcomes and value counts per column
 //
 // Talks to the host with a small hand-written JSON-RPC bridge, and to the embedded dashboard with
@@ -58,7 +58,7 @@ function applyContext(context = {}) {
   }
 }
 
-// Ask our server for a fresh study state (version switch, refresh), through the host.
+// Ask our server for a fresh study state (refresh), through the host.
 async function callTool(name, args) {
   const result = await request('tools/call', { name, arguments: args });
   if (result?.isError) throw new Error(result.content?.[0]?.text ?? 'Failed');
@@ -104,26 +104,22 @@ function receive(content) {
   if (content.simulation) state.simulation = content.simulation;
   if (content.check) state.check = content.check;
   if (content.quality) state.quality = content.quality;
-  const versionChanged = state.study?.version !== content.study.version || state.study?.id !== content.study.id;
+  const changed = state.study?.revision !== content.study.revision || state.study?.id !== content.study.id;
   state.study = content.study;
   if (content.view === 'simulation') state.tab = 'sim';
   if (content.view === 'check') state.tab = 'check';
   if (content.view === 'quality') state.tab = 'quality';
-  render(versionChanged);
+  render(changed);
 }
 
 function render(reloadFrame) {
   const { study } = state;
   $('#title').textContent = study.title;
 
-  // Version switcher: only useful if the host lets us call tools.
-  const select = $('#version');
-  select.replaceChildren(...study.versions.map((v) => el('option', { value: v.number, selected: v.number === study.version }, `v${v.number}`)));
-  select.disabled = !caps.serverTools || study.versions.length < 2;
 
   $('#open').disabled = false;
   $('#tab-sim').hidden = !state.simulation;
-  if (state.simulation) $('#tab-sim .count').textContent = state.simulation.version === study.version ? '' : `v${state.simulation.version}`;
+  if (state.simulation) $('#tab-sim .count').textContent = state.simulation.revision === study.revision ? '' : ' (earlier)';
   if (reloadFrame) loadFrame();
 
   $('#tab-check').hidden = !state.check;
@@ -152,7 +148,7 @@ function linkStatus(link) {
 
 async function refresh() {
   try {
-    receive(await callTool('show_dashboard', { study_id: state.study.id, version: state.study.version }));
+    receive(await callTool('show_dashboard', { study_id: state.study.id }));
   } catch { /* keep what is shown */ }
 }
 
@@ -162,7 +158,7 @@ const CHECK_LABEL = { pass: 'Pass', warn: 'Check', fail: 'Fix' };
 function renderCheck() {
   const check = state.check;
   $('#view-check').replaceChildren(el('div', { class: 'pad' },
-    el('h3', {}, `Launch check · v${check.version} · ${check.recruitment}`),
+    el('h3', {}, `Launch check · ${check.recruitment}`),
     el('p', {}, status_(check.ready ? 'good' : 'critical', check.ready ? 'Ready' : 'Not ready'), ' ', check.summary),
     el('ul', { class: 'rows' }, check.checks.map((c) =>
       el('li', {}, status_(CHECK_KIND[c.status], CHECK_LABEL[c.status]), el('div', { class: 'grow' }, el('strong', {}, c.check), el('small', {}, c.detail))))),
@@ -176,7 +172,7 @@ function renderQuality() {
     .filter(([k, v]) => v != null && !(Array.isArray(v) && !v.length) && !(k === 'fast_rt_ms' && q.rules.max_fast_share == null))
     .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${Array.isArray(v) ? v.length + ' IDs' : v}`);
   $('#view-quality').replaceChildren(el('div', { class: 'pad' },
-    el('h3', {}, `Data quality · ${q.version === 'all' ? 'all versions' : `v${q.version}`}${q.include_test ? ' · including previews' : ''}`),
+    el('h3', {}, `Data quality${q.include_test ? ' · including previews' : ''}`),
     el('div', { class: 'tiles' },
       tile(q.sessions, 'sessions'), tile(q.completed, 'completed'), tile(q.excluded, 'excluded'), tile(q.kept, 'kept'),
       tile(q.length.median_minutes != null ? `${q.length.median_minutes}m` : null, `median length${q.length.stated_minutes ? ` (consent: ${q.length.stated_minutes}m)` : ''}`),
@@ -192,10 +188,10 @@ function renderQuality() {
       : null,
     el('h3', {}, 'Sessions'),
     el('div', { class: 'scroll' }, el('table', { class: 'grid' },
-      el('thead', {}, el('tr', {}, ['Participant', 'v', 'Status', 'Minutes', 'Too fast', 'Attention', ''].map((h) => el('th', {}, h)))),
+      el('thead', {}, el('tr', {}, ['Participant', 'Rev.', 'Status', 'Minutes', 'Too fast', 'Attention', ''].map((h) => el('th', {}, h)))),
       el('tbody', {}, q.participants.map((p) => el('tr', {},
         el('td', {}, p.participant ?? el('span', { class: 'muted' }, p.run_id.slice(0, 8))),
-        el('td', {}, String(p.version)),
+        el('td', {}, String(p.revision)),
         el('td', {}, p.status),
         el('td', {}, p.minutes ?? '–'),
         el('td', {}, p.fast_share != null ? `${Math.round(p.fast_share * 100)}%` : '–'),
@@ -238,25 +234,28 @@ function renderStudy() {
           const input = el('input', { class: 'url', readonly: true, value: link.url, onclick: (e) => e.target.select() });
           return el('li', {},
             el('div', { class: 'grow' },
-              el('div', {}, link.label || `${link.recruitment} link`, ' ', el('span', { class: 'muted' }, `· v${link.version} · ${link.recruitment}`)),
+              el('div', {}, link.label || `${link.recruitment} link`, ' ', el('span', { class: 'muted' }, `· ${link.recruitment}`)),
               el('small', {}, `${link.started} started · ${link.completed} completed`, linkStatus(link)),
               input),
             link.status === 'open' ? status_('good', 'Open') : status_('warning', 'Closed'),
             el('button', { class: 'btn', type: 'button', onclick: async (e) => { e.target.textContent = (await copy(link.url, input)) ? 'Copied' : 'Selected'; } }, 'Copy'));
         }))
-      : el('p', { class: 'muted' }, 'No participant links yet. When this version is ready, ask Claude to create one.'),
+      : el('p', { class: 'muted' }, 'No participant links yet. When the experiment is ready, ask Claude to create one.'),
 
-    el('h3', {}, 'Versions'),
-    el('ul', { class: 'rows' }, [...study.versions].reverse().map((v) =>
-      el('li', {
-        class: `${v.number === study.version ? 'current' : ''} ${caps.serverTools && v.number !== study.version ? 'clickable' : ''}`,
-        onclick: () => caps.serverTools && v.number !== study.version && switchVersion(v.number),
-      },
-        el('span', {}, `v${v.number}`),
-        el('span', { class: 'grow' }, v.notes || el('span', { class: 'muted' }, 'No notes'), el('small', {}, date(v.created_at))),
-        v.number === study.version ? el('span', { class: 'muted' }, 'showing') : null))),
+    el('h3', {}, 'Live experiment'),
+    el('ul', { class: 'rows' }, el('li', { class: 'current' },
+      el('span', {}, `Revision ${study.revision}`),
+      el('span', { class: 'grow' }, study.update_notes || el('span', { class: 'muted' }, 'No notes'), el('small', {}, `Updated ${date(study.updated)}`)))),
 
-    el('h3', {}, `Stimuli in v${study.version}`),
+    el('h3', {}, 'Saved versions'),
+    study.saved_versions.length
+      ? el('ul', { class: 'rows' }, [...study.saved_versions].reverse().map((v) =>
+          el('li', {},
+            el('span', {}, `${v.version}`),
+            el('span', { class: 'grow' }, v.name, el('small', {}, [v.notes, `${plural(v.files, 'file')}`, date(v.saved)].filter(Boolean).join(' · ')))))) 
+      : el('p', { class: 'muted' }, 'None. Ask Claude to "save a version" to keep a snapshot you can go back to.'),
+
+    el('h3', {}, 'Stimuli'),
     study.stimuli.length
       ? el('div', { class: 'thumbs' }, study.stimuli.map((s) => el('div', { class: 'thumb', title: s.name },
           s.type.startsWith('image/') ? el('img', { src: s.url, alt: s.name, loading: 'lazy' }) : el('div', { class: 'file' }, s.name.split('.').pop()),
@@ -291,7 +290,7 @@ function renderSimulation() {
   const technical = Object.entries(sim.technical_value_counts ?? {}).map(chart);
 
   $('#view-sim').replaceChildren(el('div', { class: 'pad' },
-    el('h3', {}, `Simulated participants · v${sim.version} · ${sim.recruitment}`),
+    el('h3', {}, `Simulated participants · ${sim.recruitment}`),
     el('div', { class: 'chips' },
       done ? status_('good', `${done} completed`) : null,
       stopped ? status_('warning', `${stopped} stopped early`) : null,
@@ -324,15 +323,6 @@ document.addEventListener('mousemove', (e) => {
   tooltip.style.left = `${Math.min(e.clientX + 12, window.innerWidth - tooltip.offsetWidth - 8)}px`;
   tooltip.style.top = `${e.clientY + 14}px`;
 });
-
-async function switchVersion(number) {
-  $('#title').textContent = `${state.study.title} · loading v${number}…`;
-  try {
-    receive(await callTool('show_dashboard', { study_id: state.study.id, version: number }));
-  } catch (err) {
-    $('#title').textContent = `${state.study.title} · ${err.message}`;
-  }
-}
 
 /* ---------- Embedded dashboard (Try it) ---------- */
 
@@ -377,7 +367,7 @@ async function postToChat(text) {
   await request('ui/message', { role: 'user', content: [{ type: 'text', text }] });
 }
 
-const where = () => `${state.study.title} v${state.study.version}`;
+const where = () => `${state.study.title} (revision ${state.study.revision})`;
 
 function fromDashboard(data) {
   if (data?.type === 'second-order:ready') {
@@ -414,7 +404,6 @@ $('#feedback').addEventListener('submit', async (e) => {
 /* ---------- Controls ---------- */
 
 for (const button of document.querySelectorAll('.tabs button')) button.addEventListener('click', () => selectTab(button.dataset.tab));
-$('#version').addEventListener('change', (e) => switchVersion(Number(e.target.value)));
 $('#open').addEventListener('click', () => state.study && request('ui/open-link', { url: state.study.dashboard_url }).catch(() => {}));
 $('#full').addEventListener('click', () =>
   request('ui/request-display-mode', { mode: document.body.classList.contains('fullscreen') ? 'inline' : 'fullscreen' })

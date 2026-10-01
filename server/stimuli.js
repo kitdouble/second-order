@@ -198,18 +198,33 @@ export function listStimuli(user, studyId) {
   return {
     files: files.map((f) => ({ name: f.name, type: MIME[extensionOf(f.name)], size_kb: Math.ceil(f.size / 1024), uploaded: iso(f.created_at) })),
     total_mb: Math.round(files.reduce((sum, f) => sum + f.size, 0) / 1024 / 102.4) / 10,
-    note: 'Versions keep the files they were saved with. Save a new version to use added or replaced files.',
+    note: 'The live experiment uses these files (it rebuilds automatically after changes).',
   };
 }
 
-export function removeStimulus(user, studyId, name) {
+export function removeStimulus(user, studyId, { name, names, folder }) {
   const study = findStudy(user, studyId, 'edit');
-  const { changes } = db.prepare('DELETE FROM stimuli WHERE study_id = ? AND name = ?').run(study.id, String(name));
-  if (!changes) throw new StudyError(`No stimulus "${name}" in this study.`);
-  return { removed: name, note: 'Existing versions still have it; new versions will not.' };
+  const list = [...(name ? [name] : []), ...(names ?? [])].map(String);
+  if (!list.length && !folder) throw new StudyError('Give a name, a list of names, or a folder.');
+  let removed = 0;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const one = db.prepare('DELETE FROM stimuli WHERE study_id = ? AND name = ?');
+    for (const n of list) removed += one.run(study.id, n).changes;
+    if (folder) {
+      const prefix = `${String(folder).replace(/^\/+|\/+$/g, '')}/`;
+      removed += db.prepare("DELETE FROM stimuli WHERE study_id = ? AND substr(name, 1, ?) = ?").run(study.id, prefix.length, prefix).changes;
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  if (!removed) throw new StudyError('No matching stimuli in this study.');
+  return { removed, remaining: db.prepare('SELECT COUNT(*) AS n FROM stimuli WHERE study_id = ?').get(study.id).n };
 }
 
-/** The {name: sha256} set a new version is saved with. */
+/** The study's current {name: sha256} files, which the live experiment is built with. */
 export function currentManifest(studyId) {
   return Object.fromEntries(db.prepare('SELECT name, sha256 FROM stimuli WHERE study_id = ?').all(studyId).map((r) => [r.name, r.sha256]));
 }

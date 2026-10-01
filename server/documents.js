@@ -109,6 +109,6 @@ export function saveDocument(user, { document, kind, recruitment, title, form_la
   ).run(document, kind, recruitment, title ?? previous?.title ?? `${kind} (${recruitment})`, form_label, html, change_note ?? null, user.id, now());
   return {
     saved: `${document} ${kind} (${recruitment}): ${form_label}`,
-    note: 'Studies pick this up when they save a new version; versions already saved (and their participant links) keep the text they had.',
+    note: 'Live experiments that use this document pick it up on their next load (they rebuild automatically). Saved versions are unaffected until restored.',
   };
 }

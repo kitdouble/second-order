@@ -3,8 +3,9 @@ import { AVAILABLE_PACKAGES } from './compile.js';
 // Returned by the get_authoring_guide tool. Written for the AI assistant that writes experiments.
 export const authoringGuide = () => `# Writing a Second Order experiment
 
-An experiment is one JavaScript module using jsPsych ${AVAILABLE_PACKAGES.jspsych} (v8 syntax). Save it with save_version;
-the server compiles it with pinned package versions, and compile errors come back with line numbers.
+An experiment is one JavaScript module using jsPsych ${AVAILABLE_PACKAGES.jspsych} (v8 syntax). Each study has one live
+experiment: update_experiment compiles it with pinned package versions (compile errors come back with line numbers) and
+makes it live immediately, for previews and for participant links.
 
 ## The contract
 
@@ -16,7 +17,7 @@ import htmlKeyboardResponse from "@jspsych/plugin-html-keyboard-response";
 export const options = {};
 
 // Required. Return the timeline array. May be async.
-// context = { mode: "preview" | "live" | "simulation", recruitment: "prolific" | "sona" | "lab" | "none", version }
+// context = { mode: "preview" | "live" | "simulation", recruitment: "prolific" | "sona" | "lab" | "none", version (revision number) }
 export default function buildTimeline(jsPsych, context) {
   return [
     {
@@ -38,7 +39,7 @@ export default function buildTimeline(jsPsych, context) {
 - Put everything the analysis needs in each trial's \`data\` (condition, correct response, \`correct\`, item ids),
   so every row stands alone. Use \`jsPsych.timelineVariable(...)\` for timeline variables in parameters, and
   \`jsPsych.evaluateTimelineVariable(...)\` inside functions.
-- Participant IDs (Prolific PID/study/session, SONA id), run id, version, run_status, timestamps and
+- Participant IDs (Prolific PID/study/session, SONA id), run id, revision (which code ran), run_status, timestamps and
   \`trial_name\` (each trial's name) are added to the data by Second Order. Don't read URL parameters yourself.
 - Reloads: a participant who reloads continues from the start of the top-level timeline item they were in
   (that item's partial rows are replaced; later rows get \`attempt\`). So keep top-level items reasonably
@@ -74,12 +75,12 @@ return [deviceCheck({ devices: ["computer"] }), consent({ minutes: 15 }), demogr
 - demographics(): age, gender, English as first language, saved as age, gender, english_first_language.
   Don't reword it; add extra questions as a separate trial after it.
 - fullscreen(): asks to switch to full screen before the task (skipped where impossible, e.g. iPhones).
-- preload(jsPsych): loads every stimulus in this version before the task; stops the run if loading fails.
+- preload(jsPsych): loads every stimulus of the study before the task; stops the run if loading fails.
 - debrief({ document }): the document's debrief for the link's recruitment, put last; skipped where the
   document has none (HREC 2022/796 has one for SONA only).
 - Changing consent or debrief wording: only when the researcher explicitly asks. get_document, show them the
   exact new wording or changes, wait for their explicit confirmation, then save_document with a new form_label
-  and researcher_confirmed: true. Then save a new study version to use it.
+  and researcher_confirmed: true. Live experiments using that document pick it up automatically.
 - Previews show the Prolific version of the blocks; add ?recruitment=sona to a preview link for the SONA one.
 
 ## Stimuli
@@ -99,15 +100,16 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
 - Record stimulus names in data, never URLs (URLs are content hashes). Rows whose \`stimulus\` is an uploaded
   file also get a \`stimulus_name\` column automatically. Also available: stimuliIn(folder) for
   URLs, stimulusName(url) to map a URL back to its name.
-- A version keeps exactly the files that existed when it was saved: after adding or replacing files, save a
-  new version. stimulus() throws for a name that isn't in the version (simulate catches this).
+- Stimuli are live: added, replaced or removed files reach the live experiment automatically (no update needed).
+  stimulus() throws for a name that doesn't exist (simulate catches this). remove_stimulus deletes files from the
+  server unless a saved version keeps them; it takes a list of names or a whole folder.
 - Include preload(jsPsych) before the task when using stimuli.
 - External https image/audio/video URLs also work but uploads are preferred (they can't change or vanish).
 
 ## Workflow
 
-1. create_study (once), then save_version with the full module. Every save is a new, immutable version.
-2. simulate the new version (a few participants) and fix any errors or unexpected data before going on.
+1. create_study (once), then update_experiment with the full module. Each update replaces the live experiment.
+2. simulate (a few participants) after every update, and fix any errors or unexpected data before going on.
    Check value_counts (counted per participant for columns with one value per participant, e.g. condition):
    conditions balanced, and the columns the analysis needs present.
 3. show_dashboard so the researcher can try it (in the chat where supported; always also give the
@@ -116,8 +118,11 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
    test data.
 4. check_launch (with the recruitment, completion URL and the columns the analysis needs); fix every fail and
    go through warnings with the researcher.
-5. When they are happy, create_participant_link for that exact version (Prolific needs the completion URL
-   from Prolific). That version is what participants get, even after later saves.
+5. When they are happy, create_participant_link (Prolific needs the completion URL from Prolific). Links run
+   the live experiment, so later updates (e.g. bug fixes) reach participants straight away; tell the researcher
+   when an update will affect a study that is collecting data.
+   Saved versions: only when the researcher asks, save_version stores a named snapshot (code and files) they
+   can go back to with restore_version. Offer one before a big change during data collection.
 6. While collecting: study_status (completion, dropouts, browser errors). get_data returns trial rows as CSV
    (capped; test data excluded unless include_test); create_download_link gives the researcher the full file
    without it passing through the chat. Withdrawals: delete_participant_data, only when the researcher asks.

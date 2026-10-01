@@ -1,4 +1,4 @@
-// study_status (how a study is going) and check_launch (is a version ready for participants).
+// study_status (how a study is going) and check_launch (is the live experiment ready for participants).
 import { db, now } from './db.js';
 import { config } from './config.js';
 import { describeStudy, findStudy, iso, linkUrl, StudyError } from './studies.js';
@@ -80,16 +80,16 @@ function errors(runIds) {
     .map((g) => ({ message: g.message, participants: g.runs.size, times: g.count, trials: [...g.trials], browsers: [...g.browsers] }));
 }
 
-export function studyStatus(user, studyId, { version } = {}) {
+export function studyStatus(user, studyId) {
   const study = findStudy(user, studyId);
   const at = now();
   const all = db.prepare(
-    `SELECT r.*, v.number AS version FROM runs r JOIN study_versions v ON v.id = r.version_id WHERE r.study_id = ? ${version ? 'AND v.number = ?' : ''}
+    `SELECT r.*, v.number AS revision FROM runs r JOIN study_versions v ON v.id = r.version_id WHERE r.study_id = ?
      ORDER BY r.started_at DESC`
-  ).all(study.id, ...(version ? [version] : []));
+  ).all(study.id);
   const real = all.filter((r) => !r.is_test);
   const test = all.filter((r) => r.is_test);
-  const links = db.prepare("SELECT l.*, v.number FROM links l JOIN study_versions v ON v.id = l.version_id WHERE l.study_id = ? AND l.kind = 'live' ORDER BY l.created_at").all(study.id);
+  const links = db.prepare("SELECT * FROM links WHERE study_id = ? AND kind = 'live' ORDER BY created_at").all(study.id);
 
   return {
     study: study.id,
@@ -97,7 +97,7 @@ export function studyStatus(user, studyId, { version } = {}) {
     as_of: iso(at),
     participants: summariseRuns(real, at),
     links: links.map((link) => ({
-      label: link.label, version: link.number, recruitment: link.recruitment, status: link.closed_at ? 'closed' : 'open', url: linkUrl(link),
+      label: link.label, recruitment: link.recruitment, status: link.closed_at ? 'closed' : 'open', url: linkUrl(link),
       ...summariseRuns(real.filter((r) => r.link_token === link.token), at),
     })),
     dropouts: dropouts(real, at),
@@ -105,7 +105,7 @@ export function studyStatus(user, studyId, { version } = {}) {
     browsers: Object.entries(real.reduce((acc, r) => ({ ...acc, [browserOf(r.user_agent)]: (acc[browserOf(r.user_agent)] ?? 0) + 1 }), {}))
       .sort((a, b) => b[1] - a[1]).map(([browser, n]) => ({ browser, participants: n })),
     recent: real.slice(0, 10).map((r) => ({
-      participant: mask(r.participant_id), version: r.version, status: statusOf(r, at), started: iso(r.started_at),
+      participant: mask(r.participant_id), revision: r.revision, status: statusOf(r, at), started: iso(r.started_at),
       minutes: r.finished_at ? minutes(r.finished_at - r.started_at) : null,
       last_trial: r.last_trial_name ?? (r.last_trial_index != null ? `trial ${r.last_trial_index}` : null),
       attempts: r.attempts,
@@ -121,15 +121,15 @@ const LINK_PATTERNS = {
   sona: /^https:\/\/[a-z0-9-]+\.sona-systems\.com\/.*survey_code=XXXX/,
 };
 
-export async function checkLaunch(user, studyId, { version, recruitment = 'prolific', completion_url, required_columns = [] } = {}) {
-  const study = describeStudy(user, studyId, version);
-  if (!study.version) throw new StudyError('This study has no versions yet.');
-  const v = db.prepare('SELECT * FROM study_versions WHERE study_id = ? AND number = ?').get(study.id, study.version);
+export async function checkLaunch(user, studyId, { recruitment = 'prolific', completion_url, required_columns = [] } = {}) {
+  const study = describeStudy(user, studyId);
+  if (!study.revision) throw new StudyError('This study has no experiment yet.');
+  const v = db.prepare('SELECT * FROM study_versions WHERE study_id = ? AND number = ?').get(study.id, study.revision);
   const checks = [];
   const add = (status, check, detail) => checks.push({ status, check, detail });
 
   // Simulation
-  const sim = await simulate(user, studyId, { version: study.version, participants: 5, recruitment });
+  const sim = await simulate(user, studyId, { participants: 5, recruitment });
   const failed = sim.participants.filter((p) => !p.ok);
   const stopped = sim.participants.filter((p) => p.ok && p.stopped);
   if (failed.length) add('fail', 'Simulation', `${failed.length} of 5 simulated participants failed: ${failed[0].error.split('\n')[0]}`);
@@ -154,12 +154,12 @@ export async function checkLaunch(user, studyId, { version, recruitment = 'proli
 
   // Length and pay
   const stated = Number(v.code.match(/consent\(\s*\{[^}]*minutes\s*:\s*(\d+(?:\.\d+)?)/)?.[1]);
-  const timed = db.prepare(
-    `SELECT started_at, finished_at, stopped FROM runs WHERE version_id = ? AND finished_at IS NOT NULL AND stopped IS NULL`
-  ).all(v.id);
+  // Runs of this code (rebuilds for changed stimuli keep the same code).
+  const sameCode = `SELECT r.* FROM runs r JOIN study_versions x ON x.id = r.version_id WHERE x.study_id = ? AND x.code = ?`;
+  const timed = db.prepare(`${sameCode} AND r.finished_at IS NOT NULL AND r.stopped IS NULL`).all(study.id, v.code);
   const measured = durations(timed);
   if (!measured.n) {
-    add('warn', 'Length', `Nobody has completed this version yet${stated ? ` (consent says ${stated} minutes)` : ''}. Complete the preview once to time it.`);
+    add('warn', 'Length', `Nobody has completed the current experiment yet${stated ? ` (consent says ${stated} minutes)` : ''}. Complete the preview once to time it.`);
   } else if (stated && measured.median > stated * 1.25) {
     add('warn', 'Length', `Median ${measured.median} min over ${measured.n} completed run(s), but consent says ${stated} min. Update consent({ minutes }) so the stated length and pay are fair.`);
   } else {
@@ -167,9 +167,9 @@ export async function checkLaunch(user, studyId, { version, recruitment = 'proli
   }
 
   // Previewed by a person
-  const previewed = db.prepare('SELECT COUNT(*) AS n FROM runs WHERE version_id = ? AND is_test = 1 AND finished_at IS NOT NULL').get(v.id).n;
-  if (previewed) add('pass', 'Previewed', `${previewed} completed preview run(s) of version ${study.version}.`);
-  else add('warn', 'Previewed', `Nobody has completed the preview of version ${study.version}: ${study.preview_url}`);
+  const previewed = db.prepare(`SELECT COUNT(*) AS n FROM (${sameCode} AND r.is_test = 1 AND r.finished_at IS NOT NULL)`).get(study.id, v.code).n;
+  if (previewed) add('pass', 'Previewed', `${previewed} completed preview run(s) since the last change to the code.`);
+  else add('warn', 'Previewed', `Nobody has completed the preview since the last change to the code: ${study.preview_url}`);
 
   // Devices
   if (has('device_type')) add('pass', 'Device check', 'deviceCheck() is included.');
@@ -210,14 +210,14 @@ export async function checkLaunch(user, studyId, { version, recruitment = 'proli
     else add('fail', 'Completion URL', recruitment === 'prolific' ? 'Should look like https://app.prolific.com/submissions/complete?cc=ABC123' : 'Should be the SONA completion URL with survey_code=XXXX left as is.');
   }
 
-  // Older links still open
-  const open = study.participant_links.filter((l) => l.status === 'open' && l.version !== study.version);
-  if (open.length) add('warn', 'Other open links', `${open.length} open link(s) for other versions (${open.map((l) => `v${l.version}`).join(', ')}). Close them if they shouldn't take participants.`);
+  // Open links run changes immediately
+  const open = study.participant_links.filter((l) => l.status === 'open');
+  if (open.length) add('warn', 'Open links', `${open.length} participant link(s) are open: every update to the experiment reaches them straight away.`);
 
   const fails = checks.filter((c) => c.status === 'fail').length;
   const warns = checks.filter((c) => c.status === 'warn').length;
   return {
-    study: study.id, title: study.title, version: study.version, recruitment,
+    study: study.id, title: study.title, revision: study.revision, recruitment,
     ready: fails === 0,
     summary: fails ? `${fails} problem(s) to fix before launch, ${warns} warning(s).` : warns ? `No blockers; ${warns} warning(s) to review.` : 'Ready to launch.',
     checks,

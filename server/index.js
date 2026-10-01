@@ -10,6 +10,7 @@ import { mcp } from './mcp.js';
 import { runApp } from './run.js';
 import { uploads } from './uploads.js';
 import { downloads } from './data.js';
+import { collectGarbage } from './live.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -57,8 +58,14 @@ app.use((err, _req, res, _next) => {
   res.status(err.status ?? 500).json({ error: err.status === 413 ? 'Request too large.' : 'Something went wrong.' });
 });
 
-pruneExpired();
-setInterval(pruneExpired, 60 * 60 * 1000).unref();
+// Expired tokens, and stimulus files nothing refers to any more.
+const housekeeping = () => {
+  pruneExpired();
+  const freed = collectGarbage();
+  if (freed.files_deleted) console.log(`Removed ${freed.files_deleted} unused stimulus file(s), ${freed.mb_freed} MB`);
+};
+housekeeping();
+setInterval(housekeeping, 60 * 60 * 1000).unref();
 
 app.listen(config.port, '127.0.0.1', () => {
   console.log(`Second Order API on http://127.0.0.1:${config.port} (origin ${config.origin}, runs ${config.runOrigin}, rpID ${config.rpID})`);

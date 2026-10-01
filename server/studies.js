@@ -1,13 +1,12 @@
-// Studies, immutable versions, links and collected data. Every function takes the acting user and
-// enforces access: owners see their own studies, admins see all.
+// Studies, access, participant links and collected data. Every function takes the acting user and
+// enforces access (owner and admins, editor, viewer). The live experiment and saved versions: live.js.
 import { randomBytes } from 'node:crypto';
 import { db, newId, newToken, now } from './db.js';
 import { config } from './config.js';
-import { compileExperiment } from './compile.js';
 import { currentManifest, extensionOf, fileUrl, MIME } from './stimuli.js';
+import { currentRevision, listSavedVersions, savedVersion as savedVersionRow } from './live.js';
 import { studyStatus as statusFor } from './monitor.js';
 import { assess, rulesFor } from './quality.js';
-import { documentSnapshot } from './documents.js';
 
 export class StudyError extends Error {}
 
@@ -99,18 +98,9 @@ export function removeMember(user, studyId, email) {
   return { removed: email };
 }
 
-function findVersion(study, number) {
-  const version = number == null
-    ? db.prepare('SELECT * FROM study_versions WHERE study_id = ? ORDER BY number DESC LIMIT 1').get(study.id)
-    : db.prepare('SELECT * FROM study_versions WHERE study_id = ? AND number = ?').get(study.id, number);
-  if (!version) throw new StudyError(number == null ? 'This study has no versions yet. Save one with save_version.' : `Version ${number} does not exist.`);
-  return version;
-}
-
-const linkSummary = (link, version) => ({
+const linkSummary = (link) => ({
   url: linkUrl(link),
   kind: link.kind,
-  version: version ?? db.prepare('SELECT number FROM study_versions WHERE id = ?').get(link.version_id).number,
   recruitment: link.recruitment,
   label: link.label,
   status: link.closed_at ? `closed ${iso(link.closed_at)}` : 'open',
@@ -123,80 +113,45 @@ function runCounts(column, value) {
   ).get(value);
 }
 
-export function describeStudy(user, studyId, versionNumber) {
+/** The study and its live experiment (or, with savedVersion, that saved version's code). */
+export function describeStudy(user, studyId, savedVersion) {
   const study = findStudy(user, studyId);
-  const versions = db.prepare('SELECT id, number, notes, created_at FROM study_versions WHERE study_id = ? ORDER BY number').all(study.id);
-  const shown = versions.length ? findVersion(study, versionNumber) : null;
-  const previewLink = shown && db.prepare("SELECT * FROM links WHERE version_id = ? AND kind = 'preview'").get(shown.id);
+  const revision = currentRevision(study.id);
+  const preview = db.prepare("SELECT token FROM links WHERE study_id = ? AND kind = 'preview' ORDER BY created_at DESC LIMIT 1").get(study.id);
   const links = db.prepare("SELECT * FROM links WHERE study_id = ? AND kind = 'live' ORDER BY created_at").all(study.id);
+  const shownVersion = savedVersion != null ? savedVersionRow(study.id, savedVersion) : null;
   return {
     id: study.id,
     title: study.title,
     your_role: study.your_role,
     description: study.description,
     participants: runCounts('study_id', study.id),
-    versions: versions.map((v) => ({ number: v.number, notes: v.notes, created_at: iso(v.created_at) })),
-    participant_links: links.map((l) => linkSummary(l)),
-    ...(shown && {
-      version: shown.number,
-      preview_url: linkUrl(previewLink),
-      dashboard_url: dashboardUrl(previewLink.token),
-      packages: JSON.parse(shown.packages),
-      stimuli: Object.keys(JSON.parse(shown.stimuli)),
-      code: shown.code,
+    participant_links: links.map(linkSummary),
+    saved_versions: listSavedVersions(study.id),
+    ...(revision && {
+      revision: revision.number,
+      updated: iso(revision.created_at),
+      update_notes: revision.notes,
+      preview_url: preview && linkUrl({ token: preview.token, recruitment: 'none' }),
+      dashboard_url: preview && dashboardUrl(preview.token),
+      packages: JSON.parse(revision.packages),
+      stimuli: Object.keys(currentManifest(study.id)),
     }),
+    ...(shownVersion
+      ? { showing: `saved version ${shownVersion.number} (${shownVersion.name})`, code: shownVersion.code }
+      : revision ? { code: revision.code } : { note: 'No experiment yet: write it with update_experiment.' }),
   };
 }
 
-/** Everything the in-chat panel shows for one version of a study. */
-export function panelState(user, studyId, versionNumber) {
-  const study = describeStudy(user, studyId, versionNumber);
-  if (!study.version) throw new StudyError('This study has no versions yet. Save one with save_version.');
-  const row = db.prepare('SELECT stimuli FROM study_versions WHERE study_id = ? AND number = ?').get(study.id, study.version);
-  const stimuli = Object.entries(JSON.parse(row.stimuli)).sort(([a], [b]) => a.localeCompare(b)).map(([name, sha]) => ({
+/** Everything the in-chat panel shows for a study. */
+export function panelState(user, studyId) {
+  const study = describeStudy(user, studyId);
+  if (!study.revision) throw new StudyError('This study has no experiment yet. Write it with update_experiment.');
+  const stimuli = Object.entries(currentManifest(study.id)).sort(([a], [b]) => a.localeCompare(b)).map(([name, sha]) => ({
     name, type: MIME[extensionOf(name)] ?? 'application/octet-stream', url: `${config.runOrigin}${fileUrl(name, sha)}`,
   }));
   const { code: _code, packages: _packages, ...rest } = study;
   return { ...rest, stimuli, status: statusFor(user, study.id) };
-}
-
-/* ---------- Versions ---------- */
-
-export async function saveVersion(user, studyId, { code, notes }) {
-  const study = findStudy(user, studyId, 'edit');
-  const stimuli = currentManifest(study.id);
-  const urls = Object.fromEntries(Object.entries(stimuli).map(([name, sha]) => [name, fileUrl(name, sha)]));
-  const documents = documentSnapshot();
-  const compiled = await compileExperiment(code, urls, documents); // throws CompileError with line numbers
-
-  const versionId = newId();
-  const previewToken = newToken();
-  let number;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    number = (db.prepare('SELECT MAX(number) AS n FROM study_versions WHERE study_id = ?').get(study.id).n ?? 0) + 1;
-    db.prepare(
-      `INSERT INTO study_versions (id, study_id, number, notes, code, packages, stimuli, documents, bundle_js, bundle_css, bundle_hash, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(versionId, study.id, number, notes?.trim() || null, code, JSON.stringify(compiled.packages),
-      JSON.stringify(stimuli), JSON.stringify(documents), compiled.js, compiled.css, compiled.hash, user.id, now());
-    db.prepare(
-      `INSERT INTO links (token, study_id, version_id, kind, recruitment, created_by, created_at)
-       VALUES (?, ?, ?, 'preview', 'none', ?, ?)`
-    ).run(previewToken, study.id, versionId, user.id, now());
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
-  return {
-    version: number,
-    preview_url: linkUrl({ token: previewToken, recruitment: 'none' }),
-    dashboard_url: dashboardUrl(previewToken),
-    packages: compiled.packages,
-    stimuli: Object.keys(stimuli).length,
-    warnings: compiled.warnings,
-  };
 }
 
 /* ---------- Participant links ---------- */
@@ -206,9 +161,10 @@ const COMPLETION_PATTERNS = {
   sona: /^https:\/\/[a-z0-9-]+\.sona-systems\.com\/.*survey_code=XXXX/,
 };
 
-export function createLink(user, studyId, { version, recruitment, completion_url, label }) {
+export function createLink(user, studyId, { recruitment, completion_url, label }) {
   const study = findStudy(user, studyId, 'edit');
-  const v = findVersion(study, version);
+  const v = currentRevision(study.id);
+  if (!v) throw new StudyError('Write the experiment (update_experiment) before creating a participant link.');
   if (COMPLETION_PATTERNS[recruitment] && !COMPLETION_PATTERNS[recruitment].test(completion_url ?? '')) {
     throw new StudyError(recruitment === 'prolific'
       ? 'Prolific links need the completion URL from Prolific, like https://app.prolific.com/submissions/complete?cc=ABC123'
@@ -220,7 +176,7 @@ export function createLink(user, studyId, { version, recruitment, completion_url
      VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?)`
   ).run(token, study.id, v.id, recruitment, COMPLETION_PATTERNS[recruitment] ? completion_url : null,
     label?.trim() || null, user.id, now());
-  return linkSummary(db.prepare('SELECT * FROM links WHERE token = ?').get(token), v.number);
+  return { ...linkSummary(db.prepare('SELECT * FROM links WHERE token = ?').get(token)), note: 'Runs the live experiment, including any later updates.' };
 }
 
 export function closeLink(user, studyId, url) {
@@ -241,11 +197,10 @@ const csvCell = (value) => {
 };
 
 // One row per trial, with the run's details first so every row stands on its own.
-export function exportData(user, studyId, { version, include_test = false, completed_only = false, max_rows = 2000, exclusions = 'none' } = {}) {
+export function exportData(user, studyId, { include_test = false, completed_only = false, max_rows = 2000, exclusions = 'none' } = {}) {
   const study = findStudy(user, studyId);
   const where = ['r.study_id = ?'];
   const args = [study.id];
-  if (version != null) { where.push('v.number = ?'); args.push(version); }
   if (!include_test) where.push('r.is_test = 0');
   if (completed_only) where.push('r.finished_at IS NOT NULL AND r.stopped IS NULL');
 
@@ -264,7 +219,7 @@ export function exportData(user, studyId, { version, include_test = false, compl
   }
 
   const rows = db.prepare(
-    `SELECT r.id AS run_id, v.number AS version, r.is_test, r.participant_id, r.params,
+    `SELECT r.id AS run_id, v.number AS revision, r.is_test, r.participant_id, r.params,
             r.started_at, r.finished_at, r.stopped, t.data
      FROM runs r JOIN study_versions v ON v.id = r.version_id JOIN trials t ON t.run_id = r.id
      WHERE ${where.join(' AND ')}
@@ -275,7 +230,7 @@ export function exportData(user, studyId, { version, include_test = false, compl
   const truncated = rows.length > max_rows;
   const records = rows.slice(0, max_rows).map((row) => ({
     run_id: row.run_id,
-    version: row.version,
+    revision: row.revision,
     test: row.is_test === 1,
     participant_id: row.participant_id,
     ...Object.fromEntries(Object.entries(JSON.parse(row.params)).map(([k, v]) => [`param_${k}`, v])),
@@ -286,7 +241,7 @@ export function exportData(user, studyId, { version, include_test = false, compl
     ...JSON.parse(row.data),
   }));
   const all = [...new Set(records.flatMap(Object.keys))];
-  const first = ['run_id', 'version', 'test', 'participant_id', ...all.filter((c) => c.startsWith('param_')), 'run_started', 'run_completed', 'run_status', 'excluded', 'exclusion_reasons'];
+  const first = ['run_id', 'revision', 'test', 'participant_id', ...all.filter((c) => c.startsWith('param_')), 'run_started', 'run_completed', 'run_status', 'excluded', 'exclusion_reasons'];
   const columns = [...first.filter((c) => all.includes(c)), ...all.filter((c) => !first.includes(c))];
   const csv = [columns.join(','), ...records.map((r) => columns.map((c) => csvCell(r[c])).join(','))].join('\n');
 
