@@ -5,6 +5,7 @@ import { runLocally } from './sim/sandbox.js';
 import { compileSimulation } from './compile.js';
 import { findStudy, StudyError } from './studies.js';
 import { fileUrl } from './stimuli.js';
+import { documentSnapshot } from './documents.js';
 
 /* ---------- Running one participant ---------- */
 
@@ -48,7 +49,7 @@ const NEVER = new Set(['time_elapsed', 'rt', 'trial_index', 'stimulus', 'respons
 
 // Value counts per column. A column that has one value per participant (a condition, a counterbalancing
 // group) is counted in participants, which is what matters for balance; anything else in rows.
-function summarise(runs) {
+export function summarise(runs) {
   const people = runs.map((r) => r.rows ?? []).filter((rows) => rows.length);
   const rows = people.flat();
   const columns = [...new Set(rows.flatMap(Object.keys))];
@@ -76,7 +77,7 @@ export async function simulate(user, studyId, { version, participants = 3, recru
   if (!v) throw new StudyError(version == null ? 'This study has no versions yet.' : `Version ${version} does not exist.`);
 
   const manifest = Object.fromEntries(Object.entries(JSON.parse(v.stimuli)).map(([name, sha]) => [name, fileUrl(name, sha)]));
-  const bundle = await compileSimulation(v.code, manifest);
+  const bundle = await compileSimulation(v.code, manifest, v.documents ? JSON.parse(v.documents) : documentSnapshot(v.created_at));
 
   return exclusive(async () => {
     const started = Date.now();

@@ -52,8 +52,8 @@ export default function buildTimeline(jsPsych, context) {
 - Other randomisation (trial order etc.): jsPsych's own (randomize_order, sample, jsPsych.randomization.*).
   Second Order seeds it per participant, so a participant who reloads gets the same order.
 - Give attention checks a name containing "attention check" so check_launch and the data can find them.
-- Do not write consent forms or debriefs from scratch: ethics-approved wording must come from the researcher,
-  word for word.
+- Consent and debrief texts live in the document library (list_documents / get_document), never in experiment
+  code. Never write or paste consent or debrief wording into trials.
 
 ## Standard lab blocks (import from "second-order")
 
@@ -66,16 +66,20 @@ return [deviceCheck({ devices: ["computer"] }), consent({ minutes: 15 }), demogr
 - deviceCheck({ devices }) goes first. devices is a list of "computer", "tablet", "phone" (default ["computer"]).
   Participants on other devices are told why and the run ends without the completion redirect (not paid).
   Saves device_type, device_allowed, browser, OS and window size. Don't write your own device checks.
-- consent({ minutes }): the Participant Information Statement and consent approved under HREC 2022/796, for
-  the link's recruitment (Prolific or SONA). minutes is the study length; it fills in the length and the
-  Prolific payment (£6/hour) or SONA credit (1/hour, rounded up to 0.25). There is no approved in-lab form:
-  ask the researcher for their approved wording. Use it only for studies covered by HREC 2022/796 (ask).
+- consent({ minutes, document }): the Participant Information Statement and consent from the document library
+  for the link's recruitment. document defaults to "hrec-2022-796" (Prolific and SONA texts); ask the
+  researcher which protocol covers the study. minutes is the study length; it fills in the length and the
+  Prolific payment (£6/hour) or SONA credit (1/hour, rounded up to 0.25). The built-in protocol has no
+  in-lab form: if needed, the researcher provides approved wording and you add it with save_document.
 - demographics(): age, gender, English as first language, saved as age, gender, english_first_language.
   Don't reword it; add extra questions as a separate trial after it.
 - fullscreen(): asks to switch to full screen before the task (skipped where impossible, e.g. iPhones).
 - preload(jsPsych): loads every stimulus in this version before the task; stops the run if loading fails.
-- debrief(): the HREC 2022/796 debrief; put it last. Shown to SONA participants only.
-- Never edit, reword, shorten or restyle consent or debrief wording, or copy it into your own trials.
+- debrief({ document }): the document's debrief for the link's recruitment, put last; skipped where the
+  document has none (HREC 2022/796 has one for SONA only).
+- Changing consent or debrief wording: only when the researcher explicitly asks. get_document, show them the
+  exact new wording or changes, wait for their explicit confirmation, then save_document with a new form_label
+  and researcher_confirmed: true. Then save a new study version to use it.
 - Previews show the Prolific version of the blocks; add ?recruitment=sona to a preview link for the SONA one.
 
 ## Stimuli

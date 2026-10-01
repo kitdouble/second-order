@@ -238,6 +238,21 @@ db.exec(`
 `);
 db.exec('CREATE INDEX IF NOT EXISTS runs_participant ON runs(study_id, participant_id)');
 
+addColumn('studies', 'exclusion_rules', 'TEXT'); // JSON, see quality.js
+addColumn('study_versions', 'documents', 'TEXT'); // consent/debrief texts fixed at save (documents.js)
+
+// Collaborators: owners (and admins) share a study with other accounts as editor or viewer.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS study_members (
+    study_id  TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
+    user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role      TEXT NOT NULL CHECK (role IN ('editor', 'viewer')),
+    added_by  TEXT NOT NULL REFERENCES users(id),
+    added_at  INTEGER NOT NULL,
+    PRIMARY KEY (study_id, user_id)
+  );
+`);
+
 export const now = () => Date.now();
 export const DAY = 24 * 60 * 60 * 1000;
 export const newId = () => randomUUID();

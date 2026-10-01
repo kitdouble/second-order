@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { db, hash, newId, newToken, now } from './db.js';
 import { FILES_DIR, MIME, fileUrl } from './stimuli.js';
 import { compileDashboard, RUNTIME_VERSION } from './compile.js';
+import { documentSnapshot } from './documents.js';
 
 const MAX_TRIAL_BYTES = 5 * 1024 * 1024; // audio/video/sketchpad responses can be large
 const MAX_RUN_BYTES = 100 * 1024 * 1024;
@@ -90,7 +91,7 @@ runApp.get('/d/:token', async (req, res) => {
     const stimuli = JSON.parse(row.stimuli);
     const manifest = Object.fromEntries(Object.entries(stimuli).map(([name, sha]) => [name, fileUrl(name, sha)]));
     try {
-      const built = await compileDashboard(row.code, manifest);
+      const built = await compileDashboard(row.code, manifest, row.documents ? JSON.parse(row.documents) : documentSnapshot(row.created_at));
       db.prepare('UPDATE study_versions SET dash_js = ?, dash_css = ?, dash_hash = ?, dash_build = ? WHERE id = ?')
         .run(built.js, built.css, built.hash, RUNTIME_VERSION, row.id);
       hash = built.hash;

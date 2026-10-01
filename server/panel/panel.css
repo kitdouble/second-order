@@ -464,3 +464,27 @@ h3 .link {
   display: block;
   font-weight: 600;
 }
+
+.scroll {
+  overflow-x: auto;
+}
+
+table.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+table.grid th,
+table.grid td {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+table.grid th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+}

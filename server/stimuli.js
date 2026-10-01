@@ -118,7 +118,7 @@ export async function addFromStream(study, user, rawName, stream) {
 }
 
 export function addStimulus(user, studyId, { name: rawName, content, encoding }) {
-  const study = findStudy(user, studyId);
+  const study = findStudy(user, studyId, 'edit');
   const name = checkName(rawName);
   const buffer = Buffer.from(content, encoding === 'base64' ? 'base64' : 'utf8');
   return record(study, user, name, storeBuffer(buffer));
@@ -184,7 +184,7 @@ function download(url, redirectsLeft = 3) {
 }
 
 export async function importFromUrl(user, studyId, { url, name }) {
-  const study = findStudy(user, studyId);
+  const study = findStudy(user, studyId, 'edit');
   const finalName = checkName(name || decodeURIComponent(new URL(url).pathname.split('/').pop() || ''));
   const res = await download(url);
   return record(study, user, finalName, await storeStream(res));
@@ -203,7 +203,7 @@ export function listStimuli(user, studyId) {
 }
 
 export function removeStimulus(user, studyId, name) {
-  const study = findStudy(user, studyId);
+  const study = findStudy(user, studyId, 'edit');
   const { changes } = db.prepare('DELETE FROM stimuli WHERE study_id = ? AND name = ?').run(study.id, String(name));
   if (!changes) throw new StudyError(`No stimulus "${name}" in this study.`);
   return { removed: name, note: 'Existing versions still have it; new versions will not.' };
@@ -220,7 +220,7 @@ export const fileUrl = (name, sha256) => `/f/${sha256}.${extensionOf(name)}`;
 /* ---------- Upload links (a page in the browser for dragging files in) ---------- */
 
 export function createUploadLink(user, studyId) {
-  const study = findStudy(user, studyId);
+  const study = findStudy(user, studyId, 'edit');
   const token = newToken();
   db.prepare('INSERT INTO upload_links (token_hash, study_id, user_id, expires_at) VALUES (?, ?, ?, ?)')
     .run(hash(token), study.id, user.id, now() + UPLOAD_LINK_MINUTES * 60 * 1000);

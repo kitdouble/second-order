@@ -32,13 +32,15 @@ const format = (m) => (m.location ? `line ${m.location.line}:${m.location.column
 
 // manifest: {stimulus name: URL}, fixed into the bundle so a version always uses the same files.
 // external: leave packages unbundled (used for the quick shape check).
-function experimentPlugin(code, manifest = {}, { external = false } = {}) {
+function experimentPlugin(code, manifest = {}, { external = false, documents = {} } = {}) {
   return {
     name: 'second-order',
     setup(b) {
       b.onResolve({ filter: /^second-order:experiment$/ }, () => ({ path: 'experiment.js', namespace: 'experiment' }));
       b.onResolve({ filter: /^second-order:manifest$/ }, () => ({ path: 'manifest.json', namespace: 'manifest' }));
       b.onLoad({ filter: /.*/, namespace: 'manifest' }, () => ({ contents: JSON.stringify(manifest), loader: 'json' }));
+      b.onResolve({ filter: /^second-order:documents$/ }, () => ({ path: 'documents.json', namespace: 'documents' }));
+      b.onLoad({ filter: /.*/, namespace: 'documents' }, () => ({ contents: JSON.stringify(documents), loader: 'json' }));
       b.onResolve({ filter: /^second-order$/ }, () => (external ? { path: 'second-order', external: true } : { path: resolve(root, 'server/lib/index.js') }));
       b.onResolve({ filter: /^second-order:runtime/ }, (args) => ({
         path: resolve(root, 'server/runtime', args.path.endsWith('.css') ? 'client.css' : 'client.js'),
@@ -69,7 +71,7 @@ import * as experiment from 'second-order:experiment';
 start(experiment);
 `;
 
-export async function compileExperiment(code, manifest = {}) {
+export async function compileExperiment(code, manifest = {}, documents = {}) {
   // 1. Check the module's shape on its own, with packages left external.
   let shape;
   try {
@@ -94,7 +96,7 @@ export async function compileExperiment(code, manifest = {}) {
       bundle: true, write: false, metafile: true, minify: true, format: 'iife', target: ['es2020'],
       outdir: 'out', entryNames: 'bundle', logLevel: 'silent', legalComments: 'none',
       loader: { '.woff': 'dataurl', '.woff2': 'dataurl', '.svg': 'dataurl', '.png': 'dataurl' },
-      plugins: [experimentPlugin(code, manifest)],
+      plugins: [experimentPlugin(code, manifest, { documents })],
     });
   } catch (err) {
     throw new CompileError((err.errors ?? [{ text: err.message }]).map(format));
@@ -116,13 +118,13 @@ export async function compileExperiment(code, manifest = {}) {
 }
 
 // The same experiment and stimuli, built to run under jsPsych's data-only simulation (server/sim/).
-export async function compileSimulation(code, manifest = {}) {
+export async function compileSimulation(code, manifest = {}, documents = {}) {
   try {
     const result = await build({
       stdin: { contents: "import './server/sim/entry.js';", resolveDir: root, loader: 'js' },
       bundle: true, write: false, format: 'iife', target: ['es2022'], outdir: 'out', logLevel: 'silent',
       loader: { '.css': 'empty', '.woff': 'empty', '.woff2': 'empty', '.svg': 'empty', '.png': 'dataurl' },
-      plugins: [experimentPlugin(code, manifest)],
+      plugins: [experimentPlugin(code, manifest, { documents })],
     });
     return result.outputFiles.find((f) => f.path.endsWith('.js')).text;
   } catch (err) {
@@ -131,14 +133,14 @@ export async function compileSimulation(code, manifest = {}) {
 }
 
 // The researcher dashboard for a version (server/dashboard/): same experiment, stimuli and packages.
-export async function compileDashboard(code, manifest = {}) {
+export async function compileDashboard(code, manifest = {}, documents = {}) {
   try {
     const result = await build({
       stdin: { contents: "import './server/dashboard/entry.js';", resolveDir: root, loader: 'js' },
       bundle: true, write: false, minify: true, format: 'iife', target: ['es2020'], outdir: 'out', entryNames: 'dash',
       logLevel: 'silent', legalComments: 'none',
       loader: { '.woff': 'dataurl', '.woff2': 'dataurl', '.svg': 'dataurl', '.png': 'dataurl' },
-      plugins: [experimentPlugin(code, manifest)],
+      plugins: [experimentPlugin(code, manifest, { documents })],
     });
     const js = result.outputFiles.find((f) => f.path.endsWith('.js'))?.text ?? '';
     const css = result.outputFiles.find((f) => f.path.endsWith('.css'))?.text ?? '';

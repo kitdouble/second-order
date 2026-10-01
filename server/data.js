@@ -7,11 +7,11 @@ import { exportData, findStudy, iso, StudyError } from './studies.js';
 
 const DOWNLOAD_MINUTES = 60;
 
-export function createDownloadLink(user, studyId, { format = 'csv', version, include_test = false, completed_only = false } = {}) {
+export function createDownloadLink(user, studyId, { format = 'csv', version, include_test = false, completed_only = false, exclusions = 'none' } = {}) {
   const study = findStudy(user, studyId);
   const token = newToken();
   db.prepare('INSERT INTO download_links (token_hash, study_id, user_id, options, expires_at) VALUES (?, ?, ?, ?, ?)')
-    .run(hash(token), study.id, user.id, JSON.stringify({ format, version, include_test, completed_only }), now() + DOWNLOAD_MINUTES * 60 * 1000);
+    .run(hash(token), study.id, user.id, JSON.stringify({ format, version, include_test, completed_only, exclusions }), now() + DOWNLOAD_MINUTES * 60 * 1000);
   return {
     url: `${config.origin}/api/downloads/${token}`,
     expires_in_minutes: DOWNLOAD_MINUTES,
@@ -30,7 +30,12 @@ downloads.get('/:token', (req, res) => {
   if (!link) return res.status(404).type('text').send('This download link has expired. Ask Claude or ChatGPT for a new one.');
   const options = JSON.parse(link.options);
   const user = { id: link.uid, role: link.role };
-  const study = findStudy(user, link.study_id);
+  let study;
+  try {
+    study = findStudy(user, link.study_id);
+  } catch {
+    return res.status(403).type('text').send('You no longer have access to this study.');
+  }
   const data = exportData(user, study.id, { ...options, max_rows: Infinity });
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   const name = `${study.id}${options.version ? `-v${options.version}` : ''}${options.include_test ? '-with-test' : ''}-${stamp}`;
@@ -49,7 +54,7 @@ const pidHash = (id) => createHash('sha256').update(`second-order:${id}`).digest
  * test (preview) data. The deletion is logged without the data or the raw participant ID.
  */
 export function deleteData(user, studyId, { participant_id, run_id, test_data = false, reason }) {
-  const study = findStudy(user, studyId);
+  const study = findStudy(user, studyId, 'own');
   const chosen = [participant_id, run_id, test_data || null].filter(Boolean).length;
   if (chosen !== 1) throw new StudyError('Give exactly one of participant_id, run_id or test_data: true.');
 

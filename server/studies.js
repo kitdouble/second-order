@@ -6,6 +6,8 @@ import { config } from './config.js';
 import { compileExperiment } from './compile.js';
 import { currentManifest, extensionOf, fileUrl, MIME } from './stimuli.js';
 import { studyStatus as statusFor } from './monitor.js';
+import { assess, rulesFor } from './quality.js';
+import { documentSnapshot } from './documents.js';
 
 export class StudyError extends Error {}
 
@@ -35,21 +37,66 @@ export function createStudy(user, { title, description }) {
 export function listStudies(user) {
   return db.prepare(
     `SELECT s.id, s.title, u.name AS owner, s.created_at,
+            CASE WHEN s.owner_id = ? OR ? = 'admin' THEN 'owner' ELSE m.role END AS your_role,
             (SELECT MAX(number) FROM study_versions v WHERE v.study_id = s.id) AS latest_version,
             (SELECT COUNT(*) FROM runs r WHERE r.study_id = s.id AND r.is_test = 0) AS participants,
             (SELECT COUNT(*) FROM runs r WHERE r.study_id = s.id AND r.is_test = 0 AND r.finished_at IS NOT NULL) AS completed
      FROM studies s JOIN users u ON u.id = s.owner_id
-     WHERE s.owner_id = ? OR ? = 'admin'
+     LEFT JOIN study_members m ON m.study_id = s.id AND m.user_id = ?
+     WHERE s.owner_id = ? OR ? = 'admin' OR m.user_id IS NOT NULL
      ORDER BY s.created_at DESC`
-  ).all(user.id, user.role).map((s) => ({ ...s, created_at: iso(s.created_at) }));
+  ).all(user.id, user.role, user.id, user.id, user.role).map((s) => ({ ...s, created_at: iso(s.created_at) }));
 }
 
-export function findStudy(user, studyId) {
+/* ---------- Access: owner (and admins), editor, viewer ---------- */
+
+const RANK = { view: 1, edit: 2, own: 3 };
+const ROLE_RANK = { viewer: 1, editor: 2, owner: 3 };
+
+export function roleIn(user, study) {
+  if (user.role === 'admin' || study.owner_id === user.id) return 'owner';
+  return db.prepare('SELECT role FROM study_members WHERE study_id = ? AND user_id = ?').get(study.id, user.id)?.role ?? null;
+}
+
+// need: 'view' (read, data), 'edit' (versions, links, stimuli), 'own' (delete data, members).
+export function findStudy(user, studyId, need = 'view') {
   const study = db.prepare('SELECT * FROM studies WHERE id = ?').get(String(studyId));
-  if (!study || (study.owner_id !== user.id && user.role !== 'admin')) {
-    throw new StudyError(`No study "${studyId}". Use list_studies to see your studies.`);
+  const role = study && roleIn(user, study);
+  if (!role) throw new StudyError(`No study "${studyId}". Use list_studies to see your studies.`);
+  if (ROLE_RANK[role] < RANK[need]) {
+    throw new StudyError(`You have ${role} access to "${study.title}"; this needs ${need === 'own' ? 'owner' : 'editor'} access. Ask the study's owner.`);
   }
-  return study;
+  return { ...study, your_role: role };
+}
+
+export function shareStudy(user, studyId, { email, role }) {
+  const study = findStudy(user, studyId, 'own');
+  const member = db.prepare('SELECT id, name, email FROM users WHERE email = ?').get(String(email).trim());
+  if (!member) throw new StudyError(`No Second Order account for ${email}. An admin can invite them first (create_invite).`);
+  if (member.id === study.owner_id) throw new StudyError(`${member.name} owns this study already.`);
+  db.prepare(
+    `INSERT INTO study_members (study_id, user_id, role, added_by, added_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (study_id, user_id) DO UPDATE SET role = excluded.role`
+  ).run(study.id, member.id, role, user.id, now());
+  return { shared_with: `${member.name} <${member.email}>`, role, study: study.title };
+}
+
+export function listMembers(user, studyId) {
+  const study = findStudy(user, studyId, 'view');
+  const owner = db.prepare('SELECT name, email FROM users WHERE id = ?').get(study.owner_id);
+  const members = db.prepare(
+    `SELECT u.name, u.email, m.role, m.added_at FROM study_members m JOIN users u ON u.id = m.user_id WHERE m.study_id = ? ORDER BY m.added_at`
+  ).all(study.id);
+  return [{ ...owner, role: 'owner' }, ...members.map((m) => ({ name: m.name, email: m.email, role: m.role, added: iso(m.added_at) }))];
+}
+
+export function removeMember(user, studyId, email) {
+  const study = findStudy(user, studyId, 'own');
+  const { changes } = db.prepare(
+    'DELETE FROM study_members WHERE study_id = ? AND user_id = (SELECT id FROM users WHERE email = ?)'
+  ).run(study.id, String(email).trim());
+  if (!changes) throw new StudyError(`${email} isn't a member of this study.`);
+  return { removed: email };
 }
 
 function findVersion(study, number) {
@@ -85,6 +132,7 @@ export function describeStudy(user, studyId, versionNumber) {
   return {
     id: study.id,
     title: study.title,
+    your_role: study.your_role,
     description: study.description,
     participants: runCounts('study_id', study.id),
     versions: versions.map((v) => ({ number: v.number, notes: v.notes, created_at: iso(v.created_at) })),
@@ -115,10 +163,11 @@ export function panelState(user, studyId, versionNumber) {
 /* ---------- Versions ---------- */
 
 export async function saveVersion(user, studyId, { code, notes }) {
-  const study = findStudy(user, studyId);
+  const study = findStudy(user, studyId, 'edit');
   const stimuli = currentManifest(study.id);
   const urls = Object.fromEntries(Object.entries(stimuli).map(([name, sha]) => [name, fileUrl(name, sha)]));
-  const compiled = await compileExperiment(code, urls); // throws CompileError with line numbers
+  const documents = documentSnapshot();
+  const compiled = await compileExperiment(code, urls, documents); // throws CompileError with line numbers
 
   const versionId = newId();
   const previewToken = newToken();
@@ -127,10 +176,10 @@ export async function saveVersion(user, studyId, { code, notes }) {
   try {
     number = (db.prepare('SELECT MAX(number) AS n FROM study_versions WHERE study_id = ?').get(study.id).n ?? 0) + 1;
     db.prepare(
-      `INSERT INTO study_versions (id, study_id, number, notes, code, packages, stimuli, bundle_js, bundle_css, bundle_hash, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO study_versions (id, study_id, number, notes, code, packages, stimuli, documents, bundle_js, bundle_css, bundle_hash, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(versionId, study.id, number, notes?.trim() || null, code, JSON.stringify(compiled.packages),
-      JSON.stringify(stimuli), compiled.js, compiled.css, compiled.hash, user.id, now());
+      JSON.stringify(stimuli), JSON.stringify(documents), compiled.js, compiled.css, compiled.hash, user.id, now());
     db.prepare(
       `INSERT INTO links (token, study_id, version_id, kind, recruitment, created_by, created_at)
        VALUES (?, ?, ?, 'preview', 'none', ?, ?)`
@@ -158,7 +207,7 @@ const COMPLETION_PATTERNS = {
 };
 
 export function createLink(user, studyId, { version, recruitment, completion_url, label }) {
-  const study = findStudy(user, studyId);
+  const study = findStudy(user, studyId, 'edit');
   const v = findVersion(study, version);
   if (COMPLETION_PATTERNS[recruitment] && !COMPLETION_PATTERNS[recruitment].test(completion_url ?? '')) {
     throw new StudyError(recruitment === 'prolific'
@@ -175,7 +224,7 @@ export function createLink(user, studyId, { version, recruitment, completion_url
 }
 
 export function closeLink(user, studyId, url) {
-  const study = findStudy(user, studyId);
+  const study = findStudy(user, studyId, 'edit');
   const token = String(url).match(/\/s\/([A-Za-z0-9_-]+)/)?.[1] ?? String(url);
   const link = db.prepare("SELECT * FROM links WHERE token = ? AND study_id = ? AND kind = 'live'").get(token, study.id);
   if (!link) throw new StudyError('No participant link with that URL in this study.');
@@ -192,13 +241,27 @@ const csvCell = (value) => {
 };
 
 // One row per trial, with the run's details first so every row stands on its own.
-export function exportData(user, studyId, { version, include_test = false, completed_only = false, max_rows = 2000 } = {}) {
+export function exportData(user, studyId, { version, include_test = false, completed_only = false, max_rows = 2000, exclusions = 'none' } = {}) {
   const study = findStudy(user, studyId);
   const where = ['r.study_id = ?'];
   const args = [study.id];
   if (version != null) { where.push('v.number = ?'); args.push(version); }
   if (!include_test) where.push('r.is_test = 0');
   if (completed_only) where.push('r.finished_at IS NOT NULL AND r.stopped IS NULL');
+
+  // Exclusion rules are judged per session, over all of its rows.
+  let judged = null;
+  if (exclusions !== 'none') {
+    const rules = rulesFor(study);
+    const runs = db.prepare(`SELECT r.* FROM runs r JOIN study_versions v ON v.id = r.version_id WHERE ${where.join(' AND ')}`).all(...args);
+    const rowsOf = db.prepare('SELECT data FROM trials WHERE run_id = ?');
+    judged = new Map(runs.map((run) => [run.id, assess(run, rowsOf.all(run.id).map((t) => JSON.parse(t.data)), rules)]));
+    if (exclusions === 'drop') {
+      const keep = [...judged].filter(([, q]) => !q.excluded).map(([id]) => id);
+      where.push(keep.length ? `r.id IN (${keep.map(() => '?').join(',')})` : '0');
+      args.push(...keep);
+    }
+  }
 
   const rows = db.prepare(
     `SELECT r.id AS run_id, v.number AS version, r.is_test, r.participant_id, r.params,
@@ -219,10 +282,11 @@ export function exportData(user, studyId, { version, include_test = false, compl
     run_started: iso(row.started_at),
     run_completed: iso(row.finished_at),
     run_status: row.finished_at ? (row.stopped ? `stopped: ${row.stopped}` : 'completed') : 'incomplete',
+    ...(judged && { excluded: judged.get(row.run_id)?.excluded ?? false, exclusion_reasons: judged.get(row.run_id)?.reasons.join('; ') ?? '' }),
     ...JSON.parse(row.data),
   }));
   const all = [...new Set(records.flatMap(Object.keys))];
-  const first = ['run_id', 'version', 'test', 'participant_id', ...all.filter((c) => c.startsWith('param_')), 'run_started', 'run_completed', 'run_status'];
+  const first = ['run_id', 'version', 'test', 'participant_id', ...all.filter((c) => c.startsWith('param_')), 'run_started', 'run_completed', 'run_status', 'excluded', 'exclusion_reasons'];
   const columns = [...first.filter((c) => all.includes(c)), ...all.filter((c) => !first.includes(c))];
   const csv = [columns.join(','), ...records.map((r) => columns.map((c) => csvCell(r[c])).join(','))].join('\n');
 

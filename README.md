@@ -26,6 +26,9 @@ shows the connector URL.
 | `study_status` | owner, admin | completion, in progress / abandoned, dropout points, browser errors, durations |
 | `create_download_link` | owner, admin | one-hour link to the full CSV/JSON, outside the chat |
 | `delete_participant_data` / `list_deletions` | owner, admin | withdrawals and test-data cleanup, logged without data |
+| `quality_report` / `set_exclusion_rules` | viewer / editor | durations and pay, dropouts, fast responders, attention checks, exclusions |
+| `share_study` / `list_members` / `remove_member` | owner | collaborators as editor or viewer |
+| `list_documents` / `get_document` / `save_document` | everyone (edit: document owner, admin) | consent and debrief library; edits need the researcher's confirmation |
 | `list_stimuli` / `remove_stimulus` | owner, admin | the study's stimulus files |
 | `create_upload_link` | owner, admin | one-hour page for dragging in stimulus files |
 | `add_stimulus` / `import_stimulus_from_url` | owner, admin | add generated or public files |
@@ -41,8 +44,12 @@ the assistant and compiled by `server/compile.js` with esbuild against the exact
 `package.json`. Each save is a new version whose bundle never changes; participant links pin one version.
 
 Experiments can `import { consent, deviceCheck, demographics, fullscreen, preload, debrief, stimulus } from
-"second-order"` (`server/lib/`): the lab's standard blocks, ported from the Meta Lab jsPsych kit. The
-consent and debrief wording is ethics-approved (HREC 2022/796); never edit it.
+"second-order"` (`server/lib/`): the lab's standard blocks, ported from the Meta Lab jsPsych kit. Consent and
+debrief texts come from the document library (`server/documents.js`, seeded with the HREC 2022/796 texts in
+`server/documents/`); every edit is a new version with its own label, and each study version keeps the texts
+it was saved with.
+
+Access per study: owner (and admins), editor, viewer (`study_members`).
 
 Stimuli are stored once by SHA-256 in `<data dir>/files`; each version records the `{name: hash}` set it was
 saved with, so replacing a file never changes a saved version.

@@ -19,7 +19,7 @@ uploads.put('/:token/files', async (req, res) => {
   const link = openUploadLink(req.params.token);
   if (!link) return expired(res);
   try {
-    const study = findStudy(link.user, link.study.id);
+    const study = findStudy(link.user, link.study.id, 'edit');
     res.json(await addFromStream(study, link.user, req.query.name, req));
   } catch (err) {
     if (err instanceof StudyError) return res.status(400).json({ error: err.message });

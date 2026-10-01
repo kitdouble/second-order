@@ -25,7 +25,7 @@ const request = (method, params = {}) =>
   });
 
 let caps = {};
-const state = { study: null, simulation: null, check: null, tab: 'try' };
+const state = { study: null, simulation: null, check: null, quality: null, tab: 'try' };
 
 window.addEventListener('message', (event) => {
   if (event.origin === RUN_ORIGIN && event.source === $('#frame').contentWindow) return fromDashboard(event.data);
@@ -98,10 +98,12 @@ function receive(content) {
   if (!content?.study) return;
   if (content.simulation) state.simulation = content.simulation;
   if (content.check) state.check = content.check;
+  if (content.quality) state.quality = content.quality;
   const versionChanged = state.study?.version !== content.study.version || state.study?.id !== content.study.id;
   state.study = content.study;
   if (content.view === 'simulation') state.tab = 'sim';
   if (content.view === 'check') state.tab = 'check';
+  if (content.view === 'quality') state.tab = 'quality';
   render(versionChanged);
 }
 
@@ -120,10 +122,13 @@ function render(reloadFrame) {
   if (reloadFrame) $('#frame').src = study.dashboard_url;
 
   $('#tab-check').hidden = !state.check;
+  $('#tab-quality').hidden = !state.quality;
   renderStudy();
   if (state.simulation) renderSimulation();
   if (state.check) renderCheck();
-  selectTab((state.tab === 'sim' && !state.simulation) || (state.tab === 'check' && !state.check) ? 'try' : state.tab);
+  if (state.quality) renderQuality();
+  const missing = { sim: !state.simulation, check: !state.check, quality: !state.quality };
+  selectTab(missing[state.tab] ? 'try' : state.tab);
 }
 
 function selectTab(tab) {
@@ -157,6 +162,44 @@ function renderCheck() {
     el('ul', { class: 'rows' }, check.checks.map((c) =>
       el('li', {}, status_(CHECK_KIND[c.status], CHECK_LABEL[c.status]), el('div', { class: 'grow' }, el('strong', {}, c.check), el('small', {}, c.detail))))),
     el('p', { class: 'muted' }, check.note)));
+}
+
+function renderQuality() {
+  const q = state.quality;
+  const tile = (value, label) => el('div', { class: 'tile' }, el('strong', {}, String(value ?? '–')), el('span', {}, label));
+  const rules = Object.entries(q.rules)
+    .filter(([k, v]) => v != null && !(Array.isArray(v) && !v.length) && !(k === 'fast_rt_ms' && q.rules.max_fast_share == null))
+    .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${Array.isArray(v) ? v.length + ' IDs' : v}`);
+  $('#view-quality').replaceChildren(el('div', { class: 'pad' },
+    el('h3', {}, `Data quality · ${q.version === 'all' ? 'all versions' : `v${q.version}`}${q.include_test ? ' · including previews' : ''}`),
+    el('div', { class: 'tiles' },
+      tile(q.sessions, 'sessions'), tile(q.completed, 'completed'), tile(q.excluded, 'excluded'), tile(q.kept, 'kept'),
+      tile(q.length.median_minutes != null ? `${q.length.median_minutes}m` : null, `median length${q.length.stated_minutes ? ` (consent: ${q.length.stated_minutes}m)` : ''}`),
+      q.length.prolific_pay_per_hour_at_median ? tile(q.length.prolific_pay_per_hour_at_median, 'per hour at median') : null),
+    el('p', { class: 'muted' }, 'Rules: ', rules.join(' · ') || 'none'),
+    Object.keys(q.exclusion_reasons).length
+      ? el('div', {}, el('h3', {}, 'Why sessions are excluded'), el('ul', { class: 'rows' }, Object.entries(q.exclusion_reasons).map(([why, n]) =>
+          el('li', {}, el('span', { class: 'grow' }, why), el('span', {}, plural(n, 'session'))))))
+      : null,
+    q.dropouts.length
+      ? el('div', {}, el('h3', {}, 'Where unfinished participants stopped'), el('ul', { class: 'rows' }, q.dropouts.map((d) =>
+          el('li', {}, el('span', { class: 'grow' }, d.where), el('span', {}, plural(d.participants, 'participant'))))))
+      : null,
+    el('h3', {}, 'Sessions'),
+    el('div', { class: 'scroll' }, el('table', { class: 'grid' },
+      el('thead', {}, el('tr', {}, ['Participant', 'v', 'Status', 'Minutes', 'Too fast', 'Attention', ''].map((h) => el('th', {}, h)))),
+      el('tbody', {}, q.participants.map((p) => el('tr', {},
+        el('td', {}, p.participant ?? el('span', { class: 'muted' }, p.run_id.slice(0, 8))),
+        el('td', {}, String(p.version)),
+        el('td', {}, p.status),
+        el('td', {}, p.minutes ?? '–'),
+        el('td', {}, p.fast_share != null ? `${Math.round(p.fast_share * 100)}%` : '–'),
+        el('td', {}, p.attention ?? '–'),
+        el('td', {}, p.excluded ? status_('warning', p.reasons.join('; ')) : status_('good', 'Kept'))))))),
+    Object.keys(q.responses_kept_participants).length
+      ? el('div', {}, el('h3', {}, 'Responses (kept participants)'), el('div', { class: 'charts' }, Object.entries(q.responses_kept_participants).slice(0, 16).map(chart)))
+      : null,
+    el('p', { class: 'muted' }, q.note)));
 }
 
 function renderStudy() {
@@ -216,6 +259,21 @@ function renderStudy() {
       : el('p', { class: 'muted' }, 'None.')));
 }
 
+// Single-valued columns stay: "every participant got condition A" is exactly what to spot.
+const chart = ([column, { unit, counts }]) => {
+  const entries = Object.entries(counts);
+  const total = entries.reduce((sum, [, n]) => sum + n, 0);
+  const max = Math.max(...entries.map(([, n]) => n));
+  return el('div', { class: 'chart' },
+    el('h4', {}, column, el('span', { class: 'muted' }, ` · ${unit}`)),
+    el('table', {}, el('tbody', {}, entries.map(([value, n]) => el('tr', {
+      'data-tip': `${column} = ${value || '(empty)'}: ${n} ${unit} (${Math.round((n / total) * 100)}%)`,
+    },
+      el('td', { class: 'label', title: value }, value || '(empty)'),
+      el('td', {}, el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${(n / max) * 100}%` }))),
+      el('td', { class: 'value' }, String(n)))))));
+};
+
 /* Simulation: outcomes per participant, then a small single-hue bar chart per column. */
 function renderSimulation() {
   const sim = state.simulation;
@@ -224,20 +282,6 @@ function renderSimulation() {
   const failed = sim.participants.filter((p) => !p.ok).length;
   const errors = sim.participants.filter((p) => p.error);
 
-  // Single-valued columns stay: "every participant got condition A" is exactly what to spot.
-  const chart = ([column, { unit, counts }]) => {
-    const entries = Object.entries(counts);
-    const total = entries.reduce((sum, [, n]) => sum + n, 0);
-    const max = Math.max(...entries.map(([, n]) => n));
-    return el('div', { class: 'chart' },
-      el('h4', {}, column, el('span', { class: 'muted' }, ` · ${unit}`)),
-      el('table', {}, el('tbody', {}, entries.map(([value, n]) => el('tr', {
-        'data-tip': `${column} = ${value || '(empty)'}: ${n} ${unit} (${Math.round((n / total) * 100)}%)`,
-      },
-        el('td', { class: 'label', title: value }, value || '(empty)'),
-        el('td', {}, el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${(n / max) * 100}%` }))),
-        el('td', { class: 'value' }, String(n)))))));
-  };
   const charts = Object.entries(sim.value_counts).slice(0, 16).map(chart);
   const technical = Object.entries(sim.technical_value_counts ?? {}).map(chart);
 

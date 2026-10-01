@@ -37,11 +37,13 @@ export const panelHtml = `<!doctype html>
   <button type="button" data-tab="study">Study</button>
   <button type="button" data-tab="sim" id="tab-sim" hidden>Simulation<span class="count"></span></button>
   <button type="button" data-tab="check" id="tab-check" hidden>Launch check</button>
+  <button type="button" data-tab="quality" id="tab-quality" hidden>Quality</button>
 </nav>
 <section class="view active" id="view-try"><iframe id="frame" title="Experiment dashboard" allow="fullscreen; autoplay"></iframe></section>
 <section class="view" id="view-study"></section>
 <section class="view" id="view-sim"></section>
 <section class="view" id="view-check"></section>
+<section class="view" id="view-quality"></section>
 <form class="feedback" id="feedback" hidden>
   <input placeholder="Tell Claude what to change…" aria-label="Feedback for Claude">
   <button class="btn primary" type="submit">Send</button>
