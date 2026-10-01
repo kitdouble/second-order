@@ -51,6 +51,10 @@ function buildServer() {
         'Second Order is an invite-only platform for building and running online behavioural experiments with jsPsych. ' +
         'All work happens through these tools; there is no researcher web interface. ' +
         'Call get_authoring_guide before writing or changing experiment code. ' +
+        'This is a rebuilt Second Order (October 2026): experiments are jsPsych modules, not YAML specs. Tools from the earlier ' +
+        'version (guide/block catalogue via get, edit_spec, check qa/simulate/preview, review, prolific) no longer exist; ignore any ' +
+        'memory of them. Workflow: get_authoring_guide, create_study, save_version, simulate, show_dashboard, check_launch, ' +
+        'create_participant_link, study_status, quality_report, get_data. ' +
         'Never claim a study is collecting data unless get_study shows an open participant link with participants.',
     }
   );
