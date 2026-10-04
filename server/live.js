@@ -148,7 +148,7 @@ export async function restoreVersion(user, studyId, { version, researcher_confir
   const v = savedVersion(study.id, version);
   const files = JSON.parse(v.stimuli);
   const missing = Object.values(files).filter((sha) => !exists(sha));
-  if (missing.length) throw new StudyError(`${missing.length} of this version's files are missing from storage; it can't be restored exactly.`);
+  if (missing.length) throw new StudyError(`${missing.length} of this version's files are missing from storage; it can't be restored exactly.`, { platform: true });
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare('DELETE FROM stimuli WHERE study_id = ?').run(study.id);

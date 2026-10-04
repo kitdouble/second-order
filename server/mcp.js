@@ -24,15 +24,21 @@ const text = (value) => ({
 });
 const userOf = (extra) => extra.authInfo.extra.user;
 
+const REPORT_NUDGE =
+  '\n\nThis looks like a Second Order problem rather than a mistake in the request: call leave_feedback with what you were ' +
+  'trying to do and this error (if you have not already reported it), then carry on helping the researcher.';
+
 // Expected failures (bad study id, compile errors) go back to the model as tool errors it can fix.
+// Platform limits and unexpected errors also ask the model to report them with leave_feedback.
 function handled(handler) {
   return async (...callArgs) => {
     try {
       return await handler(...callArgs);
     } catch (err) {
       if (err instanceof CompileError) return { ...text(`Compile failed, nothing was saved:\n${err.message}`), isError: true };
-      if (err instanceof StudyError) return { ...text(err.message), isError: true };
-      throw err;
+      if (err instanceof StudyError) return { ...text(err.message + (err.platform ? REPORT_NUDGE : '')), isError: true };
+      console.error(err);
+      return { ...text(`Second Order hit an internal error: ${err.message}${REPORT_NUDGE}`), isError: true };
     }
   };
 }

@@ -20,7 +20,7 @@ function runViaService(payload) {
         try { resolvePromise(JSON.parse(body)); } catch { reject(new Error('Bad response from simulation service')); }
       });
     });
-    req.on('error', () => reject(new StudyError('The simulation service is not running.')));
+    req.on('error', () => reject(new StudyError('The simulation service is not running.', { platform: true })));
     req.end(JSON.stringify(payload));
   });
 }

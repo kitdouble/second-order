@@ -8,7 +8,14 @@ import { currentRevision, listSavedVersions, savedVersion as savedVersionRow } f
 import { studyStatus as statusFor } from './monitor.js';
 import { assess, rulesFor } from './quality.js';
 
-export class StudyError extends Error {}
+// platform: the failure is a limit or fault of Second Order itself, not a mistake in the request,
+// so the model is nudged to report it with leave_feedback.
+export class StudyError extends Error {
+  constructor(message, { platform = false } = {}) {
+    super(message);
+    this.platform = platform;
+  }
+}
 
 const slugify = (title) =>
   title.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'study';

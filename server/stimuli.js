@@ -55,7 +55,7 @@ export function checkName(raw) {
     throw new StudyError(`"${raw}" isn't a valid stimulus name. Use letters, numbers, spaces, - _ . ( ) and / for folders, e.g. faces/f1.png`);
   }
   if (!(extensionOf(name) in MIME)) {
-    throw new StudyError(`"${name}" has an unsupported type. Allowed: ${Object.keys(MIME).join(', ')}.`);
+    throw new StudyError(`"${name}" has an unsupported type. Allowed: ${Object.keys(MIME).join(', ')}.`, { platform: true });
   }
   return name;
 }
@@ -70,7 +70,7 @@ async function storeStream(source) {
   const meter = new Transform({
     transform(chunk, _enc, done) {
       size += chunk.length;
-      if (size > MAX_FILE_BYTES) return done(new StudyError(`Files can be at most ${MAX_FILE_BYTES / 1024 / 1024} MB.`));
+      if (size > MAX_FILE_BYTES) return done(new StudyError(`Files can be at most ${MAX_FILE_BYTES / 1024 / 1024} MB.`, { platform: true }));
       sha.update(chunk);
       done(null, chunk);
     },
@@ -94,7 +94,7 @@ async function storeStream(source) {
 
 function storeBuffer(buffer) {
   if (buffer.length === 0) throw new StudyError('That file is empty.');
-  if (buffer.length > MAX_FILE_BYTES) throw new StudyError(`Files can be at most ${MAX_FILE_BYTES / 1024 / 1024} MB.`);
+  if (buffer.length > MAX_FILE_BYTES) throw new StudyError(`Files can be at most ${MAX_FILE_BYTES / 1024 / 1024} MB.`, { platform: true });
   const digest = createHash('sha256').update(buffer).digest('hex');
   const target = join(FILES_DIR, digest);
   if (!existsSync(target)) writeFileSync(target, buffer);
@@ -103,7 +103,7 @@ function storeBuffer(buffer) {
 
 function record(study, user, name, { sha256, size }) {
   const others = db.prepare('SELECT COALESCE(SUM(size), 0) AS total FROM stimuli WHERE study_id = ? AND name != ?').get(study.id, name).total;
-  if (others + size > MAX_STUDY_BYTES) throw new StudyError('This study has reached its 1 GB stimulus limit.');
+  if (others + size > MAX_STUDY_BYTES) throw new StudyError('This study has reached its 1 GB stimulus limit.', { platform: true });
   const replaced = db.prepare('SELECT 1 FROM stimuli WHERE study_id = ? AND name = ?').get(study.id, name);
   db.prepare('INSERT OR REPLACE INTO stimuli (study_id, name, sha256, size, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?)')
     .run(study.id, name, sha256, size, user.id, now());
@@ -173,7 +173,7 @@ function download(url, redirectsLeft = 3) {
       }
       if (Number(res.headers['content-length']) > MAX_FILE_BYTES) {
         res.destroy();
-        return reject(new StudyError(`Files can be at most ${MAX_FILE_BYTES / 1024 / 1024} MB.`));
+        return reject(new StudyError(`Files can be at most ${MAX_FILE_BYTES / 1024 / 1024} MB.`, { platform: true }));
       }
       resolve(res);
     });
