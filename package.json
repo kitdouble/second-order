@@ -12,7 +12,9 @@
     "start": "NODE_ENV=production node --disable-warning=ExperimentalWarning --env-file-if-exists=.env server/index.js",
     "invite": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/invite.js",
     "deploy": "scripts/deploy.sh",
-    "invite:prod": "scripts/invite-prod.sh"
+    "invite:prod": "scripts/invite-prod.sh",
+    "feedback": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/feedback.js",
+    "feedback:prod": "scripts/feedback-prod.sh"
   },
   "dependencies": {
     "@jspsych/extension-mouse-tracking": "1.2.0",

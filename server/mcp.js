@@ -16,6 +16,7 @@ import { checkLaunch, studyStatus } from './monitor.js';
 import { qualityReport, setExclusionRules } from './quality.js';
 import { getDocument, listDocuments, saveDocument } from './documents.js';
 import { createDownloadLink, deleteData, deletionLog } from './data.js';
+import { leaveFeedback, listFeedback, resolveFeedback } from './feedback.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
 const text = (value) => ({
@@ -58,7 +59,10 @@ function buildServer() {
         'included); save_version stores a snapshot only when the researcher asks. Workflow: get_authoring_guide, create_study, ' +
         'update_experiment, simulate, show_dashboard, check_launch, ' +
         'create_participant_link, study_status, quality_report, get_data. ' +
-        'Never claim a study is collecting data unless get_study shows an open participant link with participants.',
+        'Never claim a study is collecting data unless get_study shows an open participant link with participants. ' +
+        'Second Order is new: when a tool fails, behaves unexpectedly, is missing something you needed, or its description or the ' +
+        'guide misled you, call leave_feedback with a short note for the maintainers (no participant data). Do this without asking, ' +
+        'once per distinct issue, and carry on helping the researcher.',
     }
   );
 
@@ -503,6 +507,47 @@ function buildServer() {
     const removed = removeStimulus(userOf(extra), study_id, which);
     return text({ ...removed, ...collectGarbage() });
   }));
+
+  /* ---------- Feedback to the maintainers ---------- */
+
+  server.registerTool('leave_feedback', {
+    title: 'Leave feedback for the maintainers',
+    description:
+      'Leave a note for the people who build Second Order about the platform itself: a bug, a limitation you hit, a tool or ' +
+      'option that was missing, or a description/guide that was wrong or unclear. Use it whenever you notice one, without asking ' +
+      'the researcher, once per distinct issue. Be concrete: what you tried, what happened, what would have helped. ' +
+      'Never include participant data or personal details. This is not for the researcher\'s study content.',
+    inputSchema: {
+      kind: z.enum(['bug', 'limitation', 'suggestion', 'docs']).describe('bug: something broke; limitation: it could not do what was needed; suggestion: an improvement; docs: a tool description or the guide was wrong or unclear'),
+      summary: z.string().min(5).max(200).describe('One line, e.g. "simulate times out on experiments with video stimuli"'),
+      details: z.string().max(4000).optional().describe('What you tried, what happened (error text), and what would have helped'),
+      tool: z.string().max(60).optional().describe('The tool this is about, if any'),
+      study_id: z.string().optional().describe('The study you were working on, if relevant'),
+      client: z.string().max(60).optional().describe('Which assistant you are, e.g. "Claude" or "ChatGPT"'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async (args, extra) => text(leaveFeedback(userOf(extra), args))));
+
+  server.registerTool('list_feedback', {
+    title: 'List feedback',
+    description: 'Admin only. Notes assistants have left with leave_feedback, newest first, for deciding what to fix next.',
+    inputSchema: {
+      status: z.enum(['open', 'resolved', 'wontfix', 'all']).default('open'),
+      limit: z.number().int().min(1).max(500).default(50),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, adminOnly(async (args) => text(listFeedback(args))));
+
+  server.registerTool('resolve_feedback', {
+    title: 'Resolve feedback',
+    description: 'Admin only. Close feedback notes once fixed (resolved) or decided against (wontfix), with a short note on what was done.',
+    inputSchema: {
+      ids: z.array(z.string().regex(/^[0-9a-f-]{4,36}$/)).min(1).max(100).describe('Note ids from list_feedback'),
+      status: z.enum(['resolved', 'wontfix', 'open']).default('resolved'),
+      resolution: z.string().max(1000).optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, adminOnly(async (args, extra) => text(resolveFeedback(userOf(extra), args))));
 
   return server;
 }
