@@ -124,7 +124,8 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
    Saved versions: only when the researcher asks, save_version stores a named snapshot (code and files) they
    can go back to with restore_version. Offer one before a big change during data collection.
 6. While collecting: study_status (completion, dropouts, browser errors). get_data returns trial rows as CSV
-   (capped; test data excluded unless include_test); create_download_link gives the researcher the full file
+   in pages of whole sessions (follow next_offset; filter rows and pick columns to fit more per page; test
+   data excluded unless include_test); create_download_link gives the researcher the full file
    without it passing through the chat. Withdrawals: delete_participant_data, only when the researcher asks.
 
 ## Available packages (exact versions)

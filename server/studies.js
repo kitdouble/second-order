@@ -204,7 +204,14 @@ const csvCell = (value) => {
 };
 
 // One row per trial, with the run's details first so every row stands on its own.
-export function exportData(user, studyId, { include_test = false, completed_only = false, max_rows = 2000, exclusions = 'none' } = {}) {
+// Rows can be filtered on trial data fields ({ task: 'test', correct: [true, false] }) and paged by session:
+// a page never splits a session unless one session alone is over max_rows.
+const FIELD = /^[A-Za-z0-9_]{1,64}$/;
+const sqlValue = (v) => (typeof v === 'boolean' ? Number(v) : v);
+
+export function exportData(user, studyId, {
+  include_test = false, completed_only = false, max_rows = 2000, exclusions = 'none', offset = 0, filter = {}, columns: only = null,
+} = {}) {
   const study = findStudy(user, studyId);
   const where = ['r.study_id = ?'];
   const args = [study.id];
@@ -225,17 +232,50 @@ export function exportData(user, studyId, { include_test = false, completed_only
     }
   }
 
-  const rows = db.prepare(
+  const sessions = db.prepare(
+    `SELECT r.id FROM runs r JOIN study_versions v ON v.id = r.version_id WHERE ${where.join(' AND ')} ORDER BY r.started_at, r.id`
+  ).all(...args).map((r) => r.id);
+  const page = sessions.slice(offset);
+
+  const trialWhere = [];
+  const trialArgs = [];
+  for (const [field, value] of Object.entries(filter ?? {})) {
+    if (!FIELD.test(field)) throw new StudyError(`"${field}" can't be filtered on; use a plain data column name.`);
+    const values = (Array.isArray(value) ? value : [value]).map(sqlValue);
+    trialWhere.push(`json_extract(t.data, '$.${field}') IN (${values.map(() => '?').join(',')})`);
+    trialArgs.push(...values);
+  }
+
+  // Fetch one row past the cap to know whether this page is the last.
+  const limit = Number.isFinite(max_rows) ? max_rows + 1 : -1;
+  const rows = [];
+  const trialsOf = db.prepare(
     `SELECT r.id AS run_id, v.number AS revision, r.is_test, r.participant_id, r.params,
             r.started_at, r.finished_at, r.stopped, t.data
      FROM runs r JOIN study_versions v ON v.id = r.version_id JOIN trials t ON t.run_id = r.id
-     WHERE ${where.join(' AND ')}
-     ORDER BY r.started_at, t.trial_index
-     LIMIT ?`
-  ).all(...args, Number.isFinite(max_rows) ? max_rows + 1 : -1);
+     WHERE r.id = ?${trialWhere.map((c) => ` AND ${c}`).join('')}
+     ORDER BY t.trial_index LIMIT ?`
+  );
+  let sessionsIncluded = 0;
+  let truncated = false;
+  let partial = false;
+  for (const id of page) {
+    const sessionRows = trialsOf.all(id, ...trialArgs, limit);
+    if (rows.length + sessionRows.length > max_rows) {
+      truncated = true;
+      if (sessionsIncluded === 0) { // one session bigger than the cap: send what fits
+        rows.push(...sessionRows.slice(0, max_rows));
+        sessionsIncluded = 1;
+        partial = true;
+      }
+      break;
+    }
+    rows.push(...sessionRows);
+    sessionsIncluded += 1;
+  }
+  const nextOffset = offset + sessionsIncluded < sessions.length ? offset + sessionsIncluded : null;
 
-  const truncated = rows.length > max_rows;
-  const records = rows.slice(0, max_rows).map((row) => ({
+  const records = rows.map((row) => ({
     run_id: row.run_id,
     revision: row.revision,
     test: row.is_test === 1,
@@ -249,12 +289,14 @@ export function exportData(user, studyId, { include_test = false, completed_only
   }));
   const all = [...new Set(records.flatMap(Object.keys))];
   const first = ['run_id', 'revision', 'test', 'participant_id', ...all.filter((c) => c.startsWith('param_')), 'run_started', 'run_completed', 'run_status', 'excluded', 'exclusion_reasons'];
-  const columns = [...first.filter((c) => all.includes(c)), ...all.filter((c) => !first.includes(c))];
+  let columns = [...first.filter((c) => all.includes(c)), ...all.filter((c) => !first.includes(c))];
+  if (only?.length) columns = columns.filter((c) => c === 'run_id' || c === 'participant_id' || only.includes(c));
   const csv = [columns.join(','), ...records.map((r) => columns.map((c) => csvCell(r[c])).join(','))].join('\n');
 
   const runs = db.prepare(
     `SELECT COUNT(*) AS started, COUNT(r.finished_at) AS completed FROM runs r JOIN study_versions v ON v.id = r.version_id
      WHERE ${where.join(' AND ')}`
   ).get(...args);
-  return { runs, rows: records.length, truncated, csv, records, columns };
+  const page_info = { sessions_total: sessions.length, offset, sessions_in_page: sessionsIncluded, partial_session: partial, next_offset: nextOffset };
+  return { runs, rows: records.length, truncated, page: page_info, csv, records, columns };
 }
