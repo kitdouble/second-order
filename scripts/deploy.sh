@@ -4,6 +4,7 @@ set -euo pipefail
 HOST="${HOST:-2ndorder.live}"
 cd "$(dirname "$0")/.."
 
+npm run check:tools
 npm run build
 rsync -az --delete \
   --exclude node_modules --exclude data --exclude .git --exclude .env --exclude .claude --exclude .DS_Store \

@@ -51,7 +51,7 @@ function adminOnly(handler) {
       : { ...text('Only Second Order admins can do this.'), isError: true };
 }
 
-function buildServer() {
+export function buildServer() {
   const server = new McpServer(
     { name: 'second-order', title: 'Second Order', version: '0.1.0' },
     {
@@ -248,6 +248,188 @@ function buildServer() {
       (page.next_offset !== null ? ` More sessions remain: call get_data again with offset ${page.next_offset} (same other arguments).` : ' That is all of them.');
     return text(`${summary}\n\n${csv}`);
   }));
+
+  server.registerTool('simulate', {
+    title: 'Simulate participants',
+    description:
+      'Run simulated participants through the live experiment (jsPsych data-only simulation in a sandboxed simulated browser) and ' +
+      'summarise the data: per-participant success/errors, columns, value counts (e.g. to check conditions and counterbalancing) and the ' +
+      'first participant\'s rows. Use after every update_experiment, before showing the researcher the dashboard. Nothing is saved. ' +
+      'Where supported, the researcher sees the results as a panel in the chat.',
+    inputSchema: {
+      study_id: z.string(),
+      participants: z.number().int().min(1).max(20).default(3),
+      recruitment: z.enum(['prolific', 'sona', 'lab', 'none']).default('prolific').describe('Which version of the standard blocks to run'),
+      simulation_options: z.record(z.string(), z.any()).optional().describe('Passed to jsPsych.simulate, e.g. {"default": {"data": {"rt": 600}}}'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    _meta: panelToolMeta,
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const simulation = await simulate(userOf(extra), study_id, args);
+    return {
+      ...text(simulation),
+      structuredContent: { view: 'simulation', simulation, study: panelState(userOf(extra), study_id) },
+    };
+  }));
+
+  // The in-chat panel (an MCP App): hosts that support it (Claude, ChatGPT) show it in the conversation.
+  server.registerResource('panel', PANEL_URI, {
+    title: 'Second Order panel',
+    description: 'In-chat dashboard, study overview and simulation results',
+    mimeType: MCP_APP_MIME,
+    _meta: panelMeta,
+  }, async () => ({ contents: [{ uri: PANEL_URI, mimeType: MCP_APP_MIME, text: panelHtml, _meta: panelMeta }] }));
+
+  server.registerTool('show_dashboard', {
+    title: 'Show dashboard',
+    description:
+      'Show the researcher the live experiment inside the chat where supported: its dashboard (timeline; run all, from any item or only one item; ' +
+      'the recorded data with downloads; runs save nothing), the study\'s participant links and counts, saved versions and stimuli. ' +
+      'The researcher can send feedback to the chat from it. Use after update_experiment + simulate. Always also give the dashboard_url, ' +
+      'in case the panel does not appear.',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    _meta: panelToolMeta,
+  }, handled(async ({ study_id }, extra) => {
+    const study = panelState(userOf(extra), study_id);
+    return {
+      content: [{ type: 'text', text: `Dashboard for ${study.title} (live, revision ${study.revision}): ${study.dashboard_url}\nFull participant preview (saves test data): ${study.preview_url}` }],
+      structuredContent: { view: 'dashboard', study },
+    };
+  }));
+
+  /* ---------- Running a study ---------- */
+
+  server.registerTool('study_status', {
+    title: 'Study status',
+    description:
+      'How a study is going: per participant link, started / completed / in progress / abandoned / stopped early, completion rate, ' +
+      'durations (median, quartiles), where participants who did not finish left off, errors from participants\' browsers (grouped, with ' +
+      'trials and browsers), browsers used, recent sessions, and the same for preview (test) runs. Check it regularly while collecting data.',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async ({ study_id }, extra) => text(studyStatus(userOf(extra), study_id))));
+
+  server.registerTool('check_launch', {
+    title: 'Check launch readiness',
+    description:
+      'Before creating a participant link: simulates the live experiment and checks consent and debrief, stated length against measured completion ' +
+      'times, that someone has completed the preview, device check, preloading and stimulus size, balanced assignment, attention checks, ' +
+      'columns the analysis needs, the completion URL and other open links. Returns pass / warn / fail per check. Fix every fail; go ' +
+      'through warnings with the researcher.',
+    inputSchema: {
+      study_id: z.string(),
+      recruitment: z.enum(['prolific', 'sona', 'lab', 'none']).default('prolific'),
+      completion_url: z.string().optional(),
+      required_columns: z.array(z.string()).default([]).describe('Data columns the planned analysis needs, e.g. ["condition", "correct", "rt"]'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    _meta: panelToolMeta,
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const check = await checkLaunch(userOf(extra), study_id, args);
+    return { ...text(check), structuredContent: { view: 'check', check, study: panelState(userOf(extra), study_id) } };
+  }));
+
+  server.registerTool('quality_report', {
+    title: 'Data quality report',
+    description:
+      'After a pilot (or any time): sessions, completion, median length against the length in consent and the Prolific pay per hour it ' +
+      'works out to, where people dropped out, each session\'s duration, share of too-fast responses and attention checks passed, which ' +
+      'sessions the study\'s exclusion rules exclude and why, and response distributions of the kept participants. Shown in the panel. ' +
+      'Never deletes anything.',
+    inputSchema: {
+      study_id: z.string(),
+      include_test: z.boolean().default(false).describe('Include preview (test) sessions, e.g. before any real pilot'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    _meta: panelToolMeta,
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const quality = qualityReport(userOf(extra), study_id, args);
+    return { ...text(quality), structuredContent: { view: 'quality', quality, study: panelState(userOf(extra), study_id) } };
+  }));
+
+  server.registerTool('set_exclusion_rules', {
+    title: 'Set exclusion rules',
+    description:
+      'Set the study\'s exclusion rules, decided once (ideally after the pilot, before the main sample) and applied the same way by ' +
+      'quality_report, get_data and create_download_link. Only set rules the researcher has agreed to (ideally as preregistered). ' +
+      'Rules given are merged into the existing ones.',
+    inputSchema: {
+      study_id: z.string(),
+      require_completed: z.boolean().optional().describe('Exclude incomplete and stopped-early sessions (default true)'),
+      min_minutes: z.number().positive().nullable().optional().describe('Exclude sessions faster than this'),
+      fast_rt_ms: z.number().int().positive().optional().describe('A response quicker than this counts as too fast (default 200)'),
+      max_fast_share: z.number().min(0).max(1).nullable().optional().describe('Exclude if more than this share of responses are too fast'),
+      attention: z.union([z.literal('all'), z.number().int().nonnegative()]).nullable().optional()
+        .describe('"all": every attention check passed; a number: at least that many. Attention checks are trials named "attention…" that record correct.'),
+      exclude_participants: z.array(z.string()).optional().describe('Platform IDs to exclude by hand (replaces the list)'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, ...rules }, extra) => text(setExclusionRules(userOf(extra), study_id,
+    Object.fromEntries(Object.entries(rules).filter(([, v]) => v !== undefined))))));
+
+  /* ---------- Consent and debrief library ---------- */
+
+  server.registerTool('list_documents', {
+    title: 'List consent and debrief documents',
+    description: 'The lab\'s ethics documents (e.g. "hrec-2022-796"): which consent and debrief texts exist for which recruitment, with their labels.',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, async () => text(listDocuments()));
+
+  server.registerTool('get_document', {
+    title: 'Get consent or debrief text',
+    description: 'The HTML of a consent or debrief text (latest version, or an earlier one) and its history. Placeholders: {{minutes}}, {{payment}}, {{credit}}, {{logo}}.',
+    inputSchema: {
+      document: z.string(), kind: z.enum(['consent', 'debrief']), recruitment: z.enum(['prolific', 'sona', 'lab', 'any']),
+      version: z.number().int().positive().optional(),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async (args) => text(getDocument(args))));
+
+  server.registerTool('save_document', {
+    title: 'Save consent or debrief text',
+    description:
+      'Add a new version of a consent or debrief text, or a new document for another protocol. These texts are ethics-approved: only call ' +
+      'this when the researcher has explicitly asked for this change, after showing them the exact new wording (or the precise changes) ' +
+      'and getting their explicit confirmation, and set researcher_confirmed only then. Never change wording on your own initiative or ' +
+      'to fix style. Give each new text its own form_label (approved version and date), which is recorded in the data. Live experiments ' +
+      'using the document pick it up straight away (they rebuild on next load).',
+    inputSchema: {
+      document: z.string().describe('Document id, e.g. "hrec-2022-796" or a new one like "hrec-2025-123"'),
+      kind: z.enum(['consent', 'debrief']),
+      recruitment: z.enum(['prolific', 'sona', 'lab', 'any']).describe('Who sees this text; "any" applies where there is no specific one'),
+      title: z.string().max(200).optional(),
+      form_label: z.string().min(3).max(200).describe('Recorded in the data as consent_form / debrief_form, e.g. "2025/123 Lab v2 (1 Oct 2026)"'),
+      html: z.string().min(20).max(200_000).describe('Full text as HTML; use the pis-* classes of the existing texts for the same layout'),
+      change_note: z.string().max(1000).optional().describe('What changed and why, e.g. "Amendment approved 30 Sep 2026: added researcher"'),
+      researcher_confirmed: z.boolean().describe('true only after the researcher explicitly confirmed this exact wording'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async (args, extra) => text(saveDocument(userOf(extra), args))));
+
+  /* ---------- Collaborators ---------- */
+
+  server.registerTool('share_study', {
+    title: 'Share study',
+    description: 'Owner only. Give another Second Order account access to a study: "editor" (change the experiment, links, stimuli, rules) or ' +
+      '"viewer" (read, simulate and see data). Sharing again changes their role. They need an account (an admin can create_invite).',
+    inputSchema: { study_id: z.string(), email: z.string().email(), role: z.enum(['editor', 'viewer']) },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(shareStudy(userOf(extra), study_id, args))));
+
+  server.registerTool('list_members', {
+    title: 'List study members',
+    description: 'Who has access to a study and with what role.',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async ({ study_id }, extra) => text(listMembers(userOf(extra), study_id))));
+
+  server.registerTool('remove_member', {
+    title: 'Remove study member',
+    description: 'Owner only. Remove someone\'s access to a study.',
+    inputSchema: { study_id: z.string(), email: z.string().email() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, email }, extra) => text(removeMember(userOf(extra), study_id, email))));
 
   server.registerTool('create_download_link', {
     title: 'Create data download link',
