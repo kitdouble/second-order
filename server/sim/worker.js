@@ -18,9 +18,13 @@ const virtualConsole = new VirtualConsole();
 for (const level of ['error', 'warn']) virtualConsole.on(level, (...args) => logs.length < 50 && logs.push(`${level}: ${args.map(String).join(' ').slice(0, 500)}`));
 virtualConsole.on('jsdomError', (err) => logs.length < 50 && logs.push(`error: ${String(err.message).slice(0, 500)}`));
 
+let finished = false;
+// Exit only once stdout has drained: stdout is a pipe, and exiting straight after a large write cuts
+// the output short (which the sandbox would report as a crash).
 const finish = (result) => {
-  process.stdout.write(JSON.stringify({ ...result, logs }));
-  process.exit(0);
+  if (finished) return;
+  finished = true;
+  process.stdout.write(JSON.stringify({ ...result, logs }), () => process.exit(0));
 };
 const fail = (err) => finish({ error: String(err?.stack || err).split('\n').slice(0, 6).join('\n') });
 process.on('unhandledRejection', fail);

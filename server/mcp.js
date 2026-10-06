@@ -6,16 +6,16 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createInvite, db } from './db.js';
 import { config } from './config.js';
 import { requireMcpAuth } from './oauth.js';
-import { closeLink, createLink, createStudy, describeStudy, exportData, listMembers, listStudies, panelState, removeMember, shareStudy, StudyError } from './studies.js';
+import { closeLink, createLink, createStudy, describeStudy, exportData, listMembers, listStudies, panelState, relabelLink, removeMember, shareStudy, StudyError, updateStudy } from './studies.js';
 import { collectGarbage, deleteSavedVersion, restoreVersion, saveVersion, storageReport, updateExperiment } from './live.js';
 import { CompileError } from './compile.js';
 import { authoringGuide } from './guide.js';
-import { addStimulus, createUploadLink, importFromUrl, listStimuli, removeStimulus } from './stimuli.js';
+import { addStimulus, copyStimuli, createUploadLink, importFromUrl, listStimuli, removeStimulus } from './stimuli.js';
 import { simulate } from './simulate.js';
 import { checkLaunch, studyStatus } from './monitor.js';
 import { qualityReport, setExclusionRules } from './quality.js';
 import { getDocument, listDocuments, saveDocument } from './documents.js';
-import { createDownloadLink, deleteData, deletionLog } from './data.js';
+import { createDownloadLink, deleteData, deletionLog, summariseData } from './data.js';
 import { leaveFeedback, listFeedback, resolveFeedback } from './feedback.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
@@ -64,7 +64,7 @@ export function buildServer() {
         'memory of them. Each study has one live experiment: update_experiment changes it immediately (open participant links ' +
         'included); save_version stores a snapshot only when the researcher asks. Workflow: get_authoring_guide, create_study, ' +
         'update_experiment, simulate, show_dashboard, check_launch, ' +
-        'create_participant_link, study_status, quality_report, get_data. ' +
+        'create_participant_link, study_status, quality_report, get_data (or summarise_data for large data sets). ' +
         'Never claim a study is collecting data unless get_study shows an open participant link with participants. ' +
         'Second Order is new: when a tool fails, behaves unexpectedly, is missing something you needed, or its description or the ' +
         'guide misled you, call leave_feedback with a short note for the maintainers (no participant data). Do this without asking, ' +
@@ -135,6 +135,17 @@ export function buildServer() {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, handled(async (args, extra) => text(createStudy(userOf(extra), args))));
+
+  server.registerTool('update_study', {
+    title: 'Rename study',
+    description: 'Change a study\'s title or description, e.g. to tell a pilot apart from a later replication. The study id stays the same.',
+    inputSchema: {
+      study_id: z.string(),
+      title: z.string().min(1).max(120).optional().describe('New researcher-facing title'),
+      description: z.string().max(2000).optional().describe('New description (an empty string clears it)'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(updateStudy(userOf(extra), study_id, args))));
 
   server.registerTool('get_study', {
     title: 'Get study',
@@ -219,12 +230,24 @@ export function buildServer() {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, handled(async ({ study_id, url }, extra) => text(closeLink(userOf(extra), study_id, url))));
 
+  server.registerTool('update_participant_link', {
+    title: 'Relabel participant link',
+    description: 'Change a participant link\'s label (e.g. "Pilot 1", "Main sample"). The URL, its participants and their data are unchanged; works on closed links too.',
+    inputSchema: {
+      study_id: z.string(),
+      url: z.string().describe('The participant link URL (or its token)'),
+      label: z.string().max(200).describe('New label; an empty string removes it'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, url, label }, extra) => text(relabelLink(userOf(extra), study_id, url, label))));
+
   server.registerTool('get_data', {
     title: 'Get data',
     description:
       'Collected trial data as CSV, one row per trial with run, revision (which code it ran), participant and run_status (completed / stopped / incomplete) columns first. ' +
       'Each call returns whole sessions up to max_rows; if next_offset is given, call again with offset set to it to get the next sessions, ' +
       'until you have them all. To fit more in, filter to the trials you need (e.g. filter {"task": "test"}) and list only the columns you need. ' +
+      'For per-participant or per-condition means instead of trial rows, use summarise_data. ' +
       'For the full file, or to keep data out of the chat, use create_download_link. ' +
       'Test (preview) data is excluded unless include_test is true. Participant IDs are pseudonymous platform IDs.',
     inputSchema: {
@@ -247,6 +270,29 @@ export function buildServer() {
       (page.partial_session ? ' That session alone is over max_rows, so it was cut short: filter rows or raise max_rows to see all of it.' : '') +
       (page.next_offset !== null ? ` More sessions remain: call get_data again with offset ${page.next_offset} (same other arguments).` : ' That is all of them.');
     return text(`${summary}\n\n${csv}`);
+  }));
+
+  server.registerTool('summarise_data', {
+    title: 'Summarise data',
+    description:
+      'Aggregate the collected trial data on the server, one row per group: e.g. group_by ["participant_id", "condition"] with ' +
+      'values ["rt", "correct"] gives each participant\'s row count and, per value column, n, mean, sd and median (numbers) or the ' +
+      'share true (true/false columns). Covers every session in one call, so use it when the trial rows are too many for get_data. ' +
+      'Filter to the trials that matter (e.g. {"task": "test"}) first. Test (preview) data is excluded unless include_test is true.',
+    inputSchema: {
+      study_id: z.string(),
+      group_by: z.array(z.string()).min(1).max(10).default(['participant_id']).describe('Columns that define a group, e.g. ["participant_id", "condition"]'),
+      values: z.array(z.string()).min(1).max(30).describe('Columns to summarise, e.g. ["rt", "correct"]'),
+      filter: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.union([z.string(), z.number(), z.boolean()]))]))
+        .optional().describe('Keep only trial rows whose data fields equal these values (a list means any of them)'),
+      include_test: z.boolean().default(false),
+      completed_only: z.boolean().default(false).describe('Only participants who reached the end'),
+      exclusions: z.enum(['none', 'mark', 'drop']).default('none').describe('Apply the study\'s exclusion rules; with mark, group by "excluded" to compare'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const { runs, rows, groups, csv } = summariseData(userOf(extra), study_id, args);
+    return text(`${runs.started} sessions (${runs.completed} completed) match; ${rows} trial rows summarised into ${groups} groups.\n\n${csv}`);
   }));
 
   server.registerTool('simulate', {
@@ -473,7 +519,7 @@ export function buildServer() {
 
   server.registerTool('list_stimuli', {
     title: 'List stimuli',
-    description: 'The study\'s current stimulus files (images, audio, video, CSV/JSON/text) by name, for use with stimulus("name") and stimuliIn("folder").',
+    description: 'The study\'s current stimulus files (images, audio, video, CSV/JSON/text) by name, for use with stimulus("name") and stimuliIn("folder"), with each file\'s public URL. To reuse them in another study, use copy_stimuli.',
     inputSchema: { study_id: z.string() },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, handled(async ({ study_id }, extra) => text(listStimuli(userOf(extra), study_id))));
@@ -507,6 +553,22 @@ export function buildServer() {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, handled(async ({ study_id, ...args }, extra) => text(await importFromUrl(userOf(extra), study_id, args))));
+
+  server.registerTool('copy_stimuli', {
+    title: 'Copy stimuli from another study',
+    description:
+      'Copy stimulus files from another study you can see into this one, in one call (e.g. for a replication): all of them, a list of ' +
+      'names, or a folder. Files are stored once, so nothing is re-uploaded. Same-named files in this study are replaced. ' +
+      'Live straight away; then update_experiment if the code needs to change.',
+    inputSchema: {
+      study_id: z.string().describe('The study to copy into'),
+      from_study_id: z.string().describe('The study to copy from'),
+      names: z.array(z.string()).max(10_000).optional(),
+      folder: z.string().optional().describe('Copy every file in this folder (and its subfolders)'),
+      prefix: z.string().max(100).optional().describe('Put the copies under this folder, e.g. "exp1"'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(copyStimuli(userOf(extra), study_id, args))));
 
   server.registerTool('remove_stimulus', {
     title: 'Remove stimuli',

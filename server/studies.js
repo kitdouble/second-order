@@ -46,12 +46,24 @@ export function listStudies(user) {
             CASE WHEN s.owner_id = ? OR ? = 'admin' THEN 'owner' ELSE m.role END AS your_role,
             (SELECT MAX(number) FROM study_versions v WHERE v.study_id = s.id) AS latest_version,
             (SELECT COUNT(*) FROM runs r WHERE r.study_id = s.id AND r.is_test = 0) AS participants,
-            (SELECT COUNT(*) FROM runs r WHERE r.study_id = s.id AND r.is_test = 0 AND r.finished_at IS NOT NULL) AS completed
+            (SELECT COUNT(*) FROM runs r WHERE r.study_id = s.id AND r.is_test = 0 AND r.finished_at IS NOT NULL AND r.stopped IS NULL) AS completed
      FROM studies s JOIN users u ON u.id = s.owner_id
      LEFT JOIN study_members m ON m.study_id = s.id AND m.user_id = ?
      WHERE s.owner_id = ? OR ? = 'admin' OR m.user_id IS NOT NULL
      ORDER BY s.created_at DESC`
   ).all(user.id, user.role, user.id, user.id, user.role).map((s) => ({ ...s, created_at: iso(s.created_at) }));
+}
+
+// The id stays the same (links and data refer to it); only the researcher-facing title and description change.
+export function updateStudy(user, studyId, { title, description }) {
+  const study = findStudy(user, studyId, 'edit');
+  if (title === undefined && description === undefined) throw new StudyError('Give a new title, description, or both.');
+  db.prepare('UPDATE studies SET title = ?, description = ? WHERE id = ?').run(
+    title === undefined ? study.title : title.trim(),
+    description === undefined ? study.description : description?.trim() || null,
+    study.id);
+  const updated = db.prepare('SELECT id, title, description FROM studies WHERE id = ?').get(study.id);
+  return { ...updated, note: 'The study id is unchanged.' };
 }
 
 /* ---------- Access: owner (and admins), editor, viewer ---------- */
@@ -114,9 +126,14 @@ const linkSummary = (link) => ({
   ...(link.kind === 'live' ? runCounts('link_token', link.token) : {}),
 });
 
+// Completed means reached the end; runs ended early by a stop block (device check, consent declined)
+// are counted separately, as in study_status.
 function runCounts(column, value) {
   return db.prepare(
-    `SELECT COUNT(*) AS started, COUNT(finished_at) AS completed FROM runs WHERE ${column} = ? AND is_test = 0`
+    `SELECT COUNT(*) AS started,
+            COUNT(CASE WHEN finished_at IS NOT NULL AND stopped IS NULL THEN 1 END) AS completed,
+            COUNT(CASE WHEN finished_at IS NOT NULL AND stopped IS NOT NULL THEN 1 END) AS stopped
+     FROM runs WHERE ${column} = ? AND is_test = 0`
   ).get(value);
 }
 
@@ -186,12 +203,25 @@ export function createLink(user, studyId, { recruitment, completion_url, label }
   return { ...linkSummary(db.prepare('SELECT * FROM links WHERE token = ?').get(token)), note: 'Runs the live experiment, including any later updates.' };
 }
 
-export function closeLink(user, studyId, url) {
-  const study = findStudy(user, studyId, 'edit');
+function findLink(study, url) {
   const token = String(url).match(/\/s\/([A-Za-z0-9_-]+)/)?.[1] ?? String(url);
   const link = db.prepare("SELECT * FROM links WHERE token = ? AND study_id = ? AND kind = 'live'").get(token, study.id);
   if (!link) throw new StudyError('No participant link with that URL in this study.');
-  if (!link.closed_at) db.prepare('UPDATE links SET closed_at = ? WHERE token = ?').run(now(), token);
+  return link;
+}
+
+export function closeLink(user, studyId, url) {
+  const study = findStudy(user, studyId, 'edit');
+  const { token, closed_at } = findLink(study, url);
+  if (!closed_at) db.prepare('UPDATE links SET closed_at = ? WHERE token = ?').run(now(), token);
+  return linkSummary(db.prepare('SELECT * FROM links WHERE token = ?').get(token));
+}
+
+// Only the label changes; the URL, recruitment and collected data stay as they are.
+export function relabelLink(user, studyId, url, label) {
+  const study = findStudy(user, studyId, 'edit');
+  const { token } = findLink(study, url);
+  db.prepare('UPDATE links SET label = ? WHERE token = ?').run(label?.trim() || null, token);
   return linkSummary(db.prepare('SELECT * FROM links WHERE token = ?').get(token));
 }
 
@@ -294,8 +324,8 @@ export function exportData(user, studyId, {
   const csv = [columns.join(','), ...records.map((r) => columns.map((c) => csvCell(r[c])).join(','))].join('\n');
 
   const runs = db.prepare(
-    `SELECT COUNT(*) AS started, COUNT(r.finished_at) AS completed FROM runs r JOIN study_versions v ON v.id = r.version_id
-     WHERE ${where.join(' AND ')}`
+    `SELECT COUNT(*) AS started, COUNT(CASE WHEN r.finished_at IS NOT NULL AND r.stopped IS NULL THEN 1 END) AS completed
+     FROM runs r JOIN study_versions v ON v.id = r.version_id WHERE ${where.join(' AND ')}`
   ).get(...args);
   const page_info = { sessions_total: sessions.length, offset, sessions_in_page: sessionsIncluded, partial_session: partial, next_offset: nextOffset };
   return { runs, rows: records.length, truncated, page: page_info, csv, records, columns };

@@ -18,6 +18,7 @@ shows the connector URL.
 | `whoami` | everyone | the signed-in account |
 | `get_authoring_guide` | everyone | experiment contract, rules, exact package versions |
 | `list_studies` / `get_study` | owner, admin | studies, versions, links, counts, code |
+| `update_study` | editor | rename a study or change its description |
 | `create_study` | everyone | new empty study |
 | `update_experiment` | owner, admin, editor | compile and make the experiment live (previews and participant links) |
 | `save_version` / `restore_version` / `delete_version` | editor (delete: owner) | named snapshots, only when asked |
@@ -31,12 +32,14 @@ shows the connector URL.
 | `quality_report` / `set_exclusion_rules` | viewer / editor | durations and pay, dropouts, fast responders, attention checks, exclusions |
 | `share_study` / `list_members` / `remove_member` | owner | collaborators as editor or viewer |
 | `list_documents` / `get_document` / `save_document` | everyone (edit: document owner, admin) | consent and debrief library; edits need the researcher's confirmation |
-| `list_stimuli` / `remove_stimulus` | owner, admin | the study's stimulus files |
+| `list_stimuli` / `remove_stimulus` | owner, admin | the study's stimulus files (with URLs) |
+| `copy_stimuli` | editor (viewer on the source) | copy files from another study, e.g. for a replication |
 | `create_upload_link` | owner, admin | one-hour page for dragging in stimulus files |
 | `add_stimulus` / `import_stimulus_from_url` | owner, admin | add generated or public files |
 | `create_participant_link` | owner, admin | Prolific / SONA / lab link pinned to one version |
-| `close_participant_link` | owner, admin | stop accepting participants |
+| `close_participant_link` / `update_participant_link` | owner, admin | stop accepting participants / relabel a link |
 | `get_data` | owner, admin | trial rows as CSV (test data excluded by default) |
+| `summarise_data` | viewer | per-group (participant, condition) n, mean, sd, median or share true, computed on the server |
 | `list_users` / `create_invite` | admin | accounts and invites |
 
 ## Experiments
@@ -64,7 +67,7 @@ permission model (`server/sim/`). In production those processes belong to the `s
 no network, no database, read-only filesystem, memory-capped, reached over a unix socket (`SIM_SOCKET`).
 
 Each version has a dashboard (`run.2ndorder.live/d/<preview token>`, `server/dashboard/`), ported from the
-kit's: the timeline, run all / from an item / only an item, recruitment switch, data with downloads; nothing
+kit's: the timeline, run all / from an item / only an item, recruitment and condition switches, data with downloads; nothing
 is saved. `show_dashboard` and `simulate` open the in-chat panel (`server/panel/`, built by `server/mcp-app.js`; an MCP
 App, protocol 2026-01-26, with a hand-written bridge): tabs for the dashboard, the study (links and counts,
 switchable versions, stimulus thumbnails) and simulation results (per-participant outcomes, value counts per

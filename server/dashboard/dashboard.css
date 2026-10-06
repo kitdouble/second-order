@@ -68,6 +68,21 @@
   border-left: 1px solid #000;
 }
 
+.db-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.db-switch-label {
+  padding: 0.45rem 0.9rem;
+  border-right: 1px solid #000;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5f6368;
+}
+
 .db-switch a.active {
   background: #000;
   color: #fff;

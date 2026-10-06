@@ -1,6 +1,7 @@
 add_stimulus
 check_launch
 close_participant_link
+copy_stimuli
 create_download_link
 create_invite
 create_participant_link
@@ -34,5 +35,8 @@ show_dashboard
 simulate
 storage_report
 study_status
+summarise_data
 update_experiment
+update_participant_link
+update_study
 whoami

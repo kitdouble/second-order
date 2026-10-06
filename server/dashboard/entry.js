@@ -2,7 +2,9 @@
 // timeline, runs all of it, from any item, or only one item, and gets the recorded data at the end.
 // Nothing is sent to the server: dashboard runs are for checking, not data.
 //
-// Routes (URL hash): none = timeline, #full, #from-2.1, #only-3. ?recruitment=sona|lab switches blocks.
+// Routes (URL hash): none = timeline, #full, #from-2.1, #only-3. ?recruitment=sona|lab switches blocks;
+// ?condition=speed (or ?<name>=… for assignCondition(…, { name })) picks the condition. Both are kept in the
+// query string, so they stay the same across the reloads that open each view.
 import 'jspsych/css/jspsych.css';
 import 'second-order:runtime.css';
 import './dashboard.css';
@@ -18,8 +20,28 @@ const config = JSON.parse(document.getElementById('so-config').textContent);
 const query = new URLSearchParams(location.search);
 const RECRUITMENT = { prolific: 'Prolific', sona: 'SONA', lab: 'Lab' };
 const recruitment = query.get('recruitment') in RECRUITMENT ? query.get('recruitment') : 'prolific';
-const context = { mode: 'preview', recruitment, version: config.version };
+
+// assignCondition: the condition chosen in the URL, else the first. Each call is recorded, so the
+// timeline view can offer a switch per assignment.
+const assignments = new Map(); // name -> { conditions, value }
+const paramFor = (name) => (name === 'recruitment' ? 'condition_recruitment' : name);
+async function assign(name, conditions) {
+  const wanted = query.get(paramFor(name));
+  const value = conditions.includes(wanted) ? wanted : conditions[0];
+  assignments.set(name, { conditions, value });
+  return value;
+}
+
+const context = { mode: 'preview', recruitment, version: config.version, assign };
 setContext(context);
+
+// This page's URL with one query parameter changed, keeping the others and the current view.
+const withParam = (key, value) => {
+  const next = new URLSearchParams(location.search);
+  next.set(key, value);
+  return `?${next}${location.hash}`;
+};
+const conditionText = () => [...assignments].map(([name, { value }]) => (name === 'condition' ? value : `${name} ${value}`)).join(', ');
 
 const root = document.getElementById('jspsych-target');
 const embedded = window.parent !== window;
@@ -97,16 +119,25 @@ function recruitmentSwitch() {
   return el('div', { class: 'db-switch', role: 'group', 'aria-label': 'Show blocks for' },
     Object.entries(RECRUITMENT).map(([key, label]) => el('a', {
       class: key === recruitment ? 'active' : null,
-      href: `?recruitment=${key}${location.hash}`,
+      href: withParam('recruitment', key),
     }, label)));
 }
+
+function conditionSwitches() {
+  return [...assignments].map(([name, { conditions, value }]) => el('div', { class: 'db-switch', role: 'group', 'aria-label': `${name} to run` },
+    el('span', { class: 'db-switch-label' }, name),
+    conditions.map((c) => el('a', { class: c === value ? 'active' : null, href: withParam(paramFor(name), c) }, c))));
+}
+
+const switches = () => el('div', { class: 'db-switches' }, recruitmentSwitch(), conditionSwitches());
 
 function summary() {
   const plugins = Object.keys(config.packages).filter((p) => p.startsWith('@jspsych/'));
   return el('ul', { class: 'db-summary' },
     el('li', {}, el('strong', {}, `jsPsych ${config.packages.jspsych ?? '?'}`), `${plugins.length} plugin${plugins.length === 1 ? '' : 's'}`),
     el('li', {}, el('strong', {}, String(config.stimuli.length)), `stimul${config.stimuli.length === 1 ? 'us' : 'i'}`),
-    el('li', {}, el('strong', {}, RECRUITMENT[recruitment]), 'blocks shown'));
+    el('li', {}, el('strong', {}, RECRUITMENT[recruitment]), 'blocks shown'),
+    assignments.size ? el('li', {}, el('strong', {}, conditionText()), assignments.size === 1 ? 'condition' : 'conditions') : null);
 }
 
 function renderItem(item) {
@@ -124,7 +155,7 @@ function renderItem(item) {
 
 function renderTimeline(items, problem) {
   root.replaceChildren(el('main', { class: 'db-page' },
-    header(recruitmentSwitch()),
+    header(switches()),
     summary(),
     problem ? el('p', { class: 'db-warning' }, problem) : null,
     el('div', { class: 'db-toolbar' },
@@ -143,7 +174,8 @@ async function run(mode, path, items) {
   root.replaceChildren(
     el('div', { class: 'db-runbar' },
       el('button', { type: 'button', onclick: () => go('') }, '← Timeline'),
-      el('span', {}, el('strong', {}, MODE_LABELS[mode]), path ? ` · ${formatPath(path)} ${where}` : ''),
+      el('span', {}, el('strong', {}, MODE_LABELS[mode]), path ? ` · ${formatPath(path)} ${where}` : '',
+        assignments.size ? ` · ${conditionText()}` : ''),
       noteToggle(path ? `item ${formatPath(path)} (${where})` : 'the full experiment'),
       el('button', { type: 'button', onclick: () => location.reload() }, 'Restart')),
     stage);
@@ -168,7 +200,7 @@ async function run(mode, path, items) {
       setTimeout(() => finished(data.values().map(nameStimulus), mode, path, items), 0);
     },
   });
-  setContext({ ...context, jsPsych }); // assignCondition picks at random here; nothing is saved
+  setContext({ ...context, jsPsych }); // assignCondition gives the condition chosen on the timeline view
   const full = await experiment.default(jsPsych, context);
   const timeline = mode === 'from' ? sliceFrom(full, path) : mode === 'only' ? sliceOnly(full, path) : full;
   await jsPsych.run(timeline);
@@ -200,14 +232,14 @@ function describeRun(rows, mode, path, items, stopped) {
   const columns = [...new Set(rows.flatMap(Object.keys))];
   // Hashed file URLs are noise for Claude once stimulus_name is there.
   const sample = JSON.stringify(rows.slice(0, 3).map(({ stimulus, ...row }) => (row.stimulus_name ? row : { stimulus, ...row }))).slice(0, 1200);
-  return `${what} with the ${RECRUITMENT[recruitment]} blocks: ${rows.length} rows, ${stopped ? `stopped early (${stopped})` : 'finished normally'}. ` +
+  return `${what} with the ${RECRUITMENT[recruitment]} blocks${assignments.size ? ` in condition ${conditionText()}` : ''}: ${rows.length} rows, ${stopped ? `stopped early (${stopped})` : 'finished normally'}. ` +
     `Columns: ${columns.join(', ')}. First rows: ${sample}`;
 }
 
 function finished(rows, mode, path, items) {
   const stopped = rows.find((r) => r.stopped)?.stopped;
   toPanel({ type: 'second-order:run', summary: describeRun(rows, mode, path, items, stopped) });
-  const stem = `r${config.version}-${mode}${path ? `-${formatPath(path)}` : ''}`;
+  const stem = `r${config.version}-${mode}${path ? `-${formatPath(path)}` : ''}${[...assignments.values()].map((a) => `-${a.value}`.replace(/[^\w.-]+/g, '_')).join('')}`;
   const columns = [...new Set(rows.flatMap(Object.keys))];
   const shown = rows.slice(0, 200);
 
@@ -244,7 +276,7 @@ const announce = () => toPanel({ type: 'second-order:ready', width: window.inner
     // Describe the timeline once, with a throwaway jsPsych instance.
     items = describeTimeline(await experiment.default(initJsPsych(), context));
   } catch (err) {
-    root.replaceChildren(el('main', { class: 'db-page' }, header(recruitmentSwitch()),
+    root.replaceChildren(el('main', { class: 'db-page' }, header(switches()),
       el('h2', {}, 'This version has an error'),
       el('p', { class: 'db-warning' }, String(err?.message ?? err))));
     return;

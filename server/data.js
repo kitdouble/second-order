@@ -92,3 +92,55 @@ export function deletionLog(user, studyId) {
   return db.prepare('SELECT scope, runs, reason, at FROM deletions WHERE study_id = ? ORDER BY at DESC').all(study.id)
     .map((d) => ({ ...d, at: iso(d.at) }));
 }
+
+/* ---------- Summaries (aggregates that fit in the chat when the trial rows don't) ---------- */
+
+const MAX_GROUPS = 5000;
+const round = (x) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 1000) / 1000);
+const median = (sorted) => (sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2);
+const asNumber = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+
+// One row per group (e.g. per participant and condition): row count, and for each value column its mean,
+// sd and median (numbers) or the share true (true/false columns), over the rows that have it.
+export function summariseData(user, studyId, { group_by = ['participant_id'], values, ...options }) {
+  const { runs, records, columns } = exportData(user, studyId, { ...options, max_rows: Infinity, offset: 0 });
+  const unknown = [...group_by, ...values].filter((c) => !columns.includes(c));
+  if (records.length && unknown.length) {
+    throw new StudyError(`No column ${unknown.map((c) => `"${c}"`).join(', ')} in these rows. Columns: ${columns.slice(0, 80).join(', ')}`);
+  }
+
+  const groups = new Map();
+  for (const row of records) {
+    const key = JSON.stringify(group_by.map((c) => row[c] ?? null));
+    let g = groups.get(key);
+    if (!g) {
+      if (groups.size >= MAX_GROUPS) throw new StudyError(`More than ${MAX_GROUPS} groups: group by fewer or coarser columns.`);
+      g = { key: group_by.map((c) => row[c] ?? null), rows: 0, values: Object.fromEntries(values.map((c) => [c, []])) };
+      groups.set(key, g);
+    }
+    g.rows += 1;
+    for (const c of values) if (row[c] != null && row[c] !== '') g.values[c].push(row[c]);
+  }
+
+  // A column is summarised as true/false when every value in it is a boolean, otherwise as numbers.
+  const kind = Object.fromEntries(values.map((c) => [c, records.every((r) => r[c] == null || r[c] === '' || typeof r[c] === 'boolean') ? 'share' : 'number']));
+  const header = [...group_by, 'n_rows', ...values.flatMap((c) => (kind[c] === 'share' ? [`${c}_n`, `${c}_share_true`] : [`${c}_n`, `${c}_mean`, `${c}_sd`, `${c}_median`]))];
+  const out = [...groups.values()].map((g) => {
+    const cells = [...g.key, g.rows];
+    for (const c of values) {
+      if (kind[c] === 'share') {
+        const vs = g.values[c];
+        cells.push(vs.length, vs.length ? round(vs.filter(Boolean).length / vs.length) : null);
+      } else {
+        const xs = g.values[c].map(asNumber).filter((x) => x !== null).sort((a, b) => a - b);
+        const mean = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+        const sd = xs.length > 1 ? Math.sqrt(xs.reduce((a, x) => a + (x - mean) ** 2, 0) / (xs.length - 1)) : null;
+        cells.push(xs.length, round(mean), round(sd), xs.length ? round(median(xs)) : null);
+      }
+    }
+    return cells;
+  });
+  const csvCell = (v) => { if (v == null) return ''; const s = typeof v === 'object' ? JSON.stringify(v) : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const csv = [header.join(','), ...out.map((cells) => cells.map(csvCell).join(','))].join('\n');
+  return { runs, rows: records.length, groups: out.length, csv };
+}

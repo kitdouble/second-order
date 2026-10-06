@@ -299,6 +299,12 @@ runApp.post('/api/runs/:id/assign', (req, res) => {
   if (!/^[A-Za-z_][A-Za-z0-9_]{0,40}$/.test(name) || conditions.length < 2 || conditions.some((c) => c.length > 200)) {
     return fail(res, 400, 'Invalid assignment request.');
   }
+  // Preview (test) runs can be put in a condition from the preview link (?condition=speed), to check each one.
+  const chosen = String(req.body.chosen ?? '');
+  if (run.is_test && conditions.includes(chosen)) {
+    db.prepare('INSERT OR REPLACE INTO assignments (run_id, name, value, at) VALUES (?, ?, ?, ?)').run(run.id, name, chosen, now());
+    return res.json({ value: chosen });
+  }
   const existing = db.prepare('SELECT value FROM assignments WHERE run_id = ? AND name = ?').get(run.id, name);
   if (existing) return res.json({ value: existing.value });
 

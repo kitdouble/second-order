@@ -114,8 +114,9 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
    conditions balanced, and the columns the analysis needs present.
 3. show_dashboard so the researcher can try it (in the chat where supported; always also give the
    dashboard_url). The dashboard lists the timeline and runs all of it, from any item or only one item,
-   showing the data at the end; it saves nothing. preview_url is the full participant experience and saves
-   test data.
+   showing the data at the end; it saves nothing. It has a switch per assignCondition to pick the condition
+   (kept while moving between views; dashboard_url?condition=speed opens on one). preview_url is the full
+   participant experience and saves test data; add ?condition=speed to it to preview one condition.
 4. check_launch (with the recruitment, completion URL and the columns the analysis needs); fix every fail and
    go through warnings with the researcher.
 5. When they are happy, create_participant_link (Prolific needs the completion URL from Prolific). Links run

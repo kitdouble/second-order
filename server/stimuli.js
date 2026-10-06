@@ -194,9 +194,12 @@ export async function importFromUrl(user, studyId, { url, name }) {
 
 export function listStimuli(user, studyId) {
   const study = findStudy(user, studyId);
-  const files = db.prepare('SELECT name, size, created_at FROM stimuli WHERE study_id = ? ORDER BY name').all(study.id);
+  const files = db.prepare('SELECT name, sha256, size, created_at FROM stimuli WHERE study_id = ? ORDER BY name').all(study.id);
   return {
-    files: files.map((f) => ({ name: f.name, type: MIME[extensionOf(f.name)], size_kb: Math.ceil(f.size / 1024), uploaded: iso(f.created_at) })),
+    files: files.map((f) => ({
+      name: f.name, type: MIME[extensionOf(f.name)], size_kb: Math.ceil(f.size / 1024), uploaded: iso(f.created_at),
+      url: `${config.runOrigin}${fileUrl(f.name, f.sha256)}`,
+    })),
     total_mb: Math.round(files.reduce((sum, f) => sum + f.size, 0) / 1024 / 102.4) / 10,
     note: 'The live experiment uses these files (it rebuilds automatically after changes).',
   };
@@ -222,6 +225,45 @@ export function removeStimulus(user, studyId, { name, names, folder }) {
   }
   if (!removed) throw new StudyError('No matching stimuli in this study.');
   return { removed, remaining: db.prepare('SELECT COUNT(*) AS n FROM stimuli WHERE study_id = ?').get(study.id).n };
+}
+
+// Files are stored once by hash, so copying only adds names to the target study: nothing is re-uploaded.
+export function copyStimuli(user, toStudyId, { from_study_id, names, folder, prefix = '' }) {
+  const from = findStudy(user, from_study_id);
+  const to = findStudy(user, toStudyId, 'edit');
+  if (from.id === to.id) throw new StudyError('The source and target are the same study.');
+  let files = db.prepare('SELECT name, sha256, size FROM stimuli WHERE study_id = ? ORDER BY name').all(from.id);
+  if (names?.length || folder) {
+    const wanted = new Set((names ?? []).map(String));
+    const inFolder = folder ? `${String(folder).replace(/^\/+|\/+$/g, '')}/` : null;
+    files = files.filter((f) => wanted.has(f.name) || (inFolder && f.name.startsWith(inFolder)));
+    const missing = [...wanted].filter((n) => !files.some((f) => f.name === n));
+    if (missing.length) throw new StudyError(`Not in "${from.title}": ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ` and ${missing.length - 10} more` : ''}. Nothing was copied.`);
+  }
+  if (!files.length) throw new StudyError(`No matching stimuli in "${from.title}".`);
+  const target = files.map((f) => ({ ...f, name: checkName(`${String(prefix).replace(/^\/+|\/+$/g, '')}${prefix ? '/' : ''}${f.name}`) }));
+
+  const existing = new Map(db.prepare('SELECT name, size FROM stimuli WHERE study_id = ?').all(to.id).map((r) => [r.name, r.size]));
+  const total = [...existing.values()].reduce((a, b) => a + b, 0) + target.reduce((sum, f) => sum + f.size - (existing.get(f.name) ?? 0), 0);
+  if (total > MAX_STUDY_BYTES) throw new StudyError('Copying these would take the study over its 1 GB stimulus limit. Nothing was copied.', { platform: true });
+
+  const insert = db.prepare('INSERT OR REPLACE INTO stimuli (study_id, name, sha256, size, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const f of target) insert.run(to.id, f.name, f.sha256, f.size, user.id, now());
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return {
+    copied: target.length,
+    replaced: target.filter((f) => existing.has(f.name)).length,
+    from: from.title,
+    to: to.title,
+    ...(prefix && { under: `${String(prefix).replace(/^\/+|\/+$/g, '')}/` }),
+    note: 'Live straight away in the target study (list_stimuli shows the names).',
+  };
 }
 
 /** The study's current {name: sha256} files, which the live experiment is built with. */

@@ -150,7 +150,9 @@ export async function start(experiment) {
 
   setContext({
     mode: config.mode, recruitment, version: config.version, jsPsych,
-    assign: async (name, conditions) => (await post(`/api/runs/${run.id}/assign`, { key: run.key, name, conditions })).value,
+    assign: async (name, conditions) => (await post(`/api/runs/${run.id}/assign`, {
+      key: run.key, name, conditions, ...(!live && query.get(name) != null && { chosen: query.get(name) }),
+    })).value,
   });
 
   let nodes;
