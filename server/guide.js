@@ -119,7 +119,10 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
    participant experience and saves test data; add ?condition=speed to it to preview one condition.
 4. check_launch (with the recruitment, completion URL and the columns the analysis needs); fix every fail and
    go through warnings with the researcher.
-5. When they are happy, create_participant_link (Prolific needs the completion URL from Prolific). Links run
+5. When they are happy: for Prolific, create_prolific_draft (makes the link and the Prolific study: lab advert,
+   US and UK, balanced male/female, pay from consent minutes), then launch_prolific_study and add_prolific_places,
+   which return a quote first: show it, and send the confirm_code only after the researcher says yes. Spending
+   is capped per study and per researcher per month. For SONA and others, create_participant_link. Links run
    the live experiment, so later updates (e.g. bug fixes) reach participants straight away; tell the researcher
    when an update will affect a study that is collecting data.
    Saved versions: only when the researcher asks, save_version stores a named snapshot (code and files) they

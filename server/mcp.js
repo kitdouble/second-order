@@ -17,6 +17,7 @@ import { qualityReport, setExclusionRules } from './quality.js';
 import { getDocument, listDocuments, saveDocument } from './documents.js';
 import { createDownloadLink, deleteData, deletionLog, summariseData } from './data.js';
 import { leaveFeedback, listFeedback, resolveFeedback } from './feedback.js';
+import { addPlaces, createDraft, launch, listProlificStudies, prolificStatus, setProlificStatus } from './prolific.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
 const text = (value) => ({
@@ -61,10 +62,10 @@ export function buildServer() {
         'Call get_authoring_guide before writing or changing experiment code. ' +
         'This is a rebuilt Second Order (October 2026): experiments are jsPsych modules, not YAML specs. Tools from the earlier ' +
         'version (guide/block catalogue via get, edit_spec, check qa/simulate/preview, review, prolific) no longer exist; ignore any ' +
-        'memory of them. Each study has one live experiment: update_experiment changes it immediately (open participant links ' +
+        'memory of them (Prolific is now create_prolific_draft, launch_prolific_study, add_prolific_places, prolific_status).  Each study has one live experiment: update_experiment changes it immediately (open participant links ' +
         'included); save_version stores a snapshot only when the researcher asks. Workflow: get_authoring_guide, create_study, ' +
         'update_experiment, simulate, show_dashboard, check_launch, ' +
-        'create_participant_link, study_status, quality_report, get_data (or summarise_data for large data sets). ' +
+        'create_participant_link (or for Prolific create_prolific_draft then launch_prolific_study), study_status, quality_report, get_data (or summarise_data for large data sets). ' +
         'Never claim a study is collecting data unless get_study shows an open participant link with participants. ' +
         'Second Order is new: when a tool fails, behaves unexpectedly, is missing something you needed, or its description or the ' +
         'guide misled you, call leave_feedback with a short note for the maintainers (no participant data). Do this without asking, ' +
@@ -213,6 +214,7 @@ export function buildServer() {
     description:
       'Create a link for real participants. It runs the study\'s live experiment, including later updates. Returns the URL to paste into Prolific or SONA ' +
       '(with their placeholders already in it). Creating a link does not recruit anyone: the researcher launches the study on the platform. ' +
+      'For Prolific, prefer create_prolific_draft, which makes the link and the Prolific study together. ' +
       'Only create one after the researcher has tried the experiment and check_launch has no fails.',
     inputSchema: {
       study_id: z.string(),
@@ -413,6 +415,94 @@ export function buildServer() {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, handled(async ({ study_id, ...rules }, extra) => text(setExclusionRules(userOf(extra), study_id,
     Object.fromEntries(Object.entries(rules).filter(([, v]) => v !== undefined))))));
+
+  /* ---------- Prolific ---------- */
+
+  server.registerTool('create_prolific_draft', {
+    title: 'Create Prolific draft',
+    description:
+      'Make an unpublished Prolific study for this study, with its own participant link and completion code (auto-approve) wired up. ' +
+      'Uses the lab\'s standard advert, US and UK residents, a sample balanced male and female, desktop only when the experiment\'s ' +
+      'deviceCheck allows only computers, and the length and pay from consent({ minutes }) at the lab rate. Spends nothing. ' +
+      'Can exclude people who did earlier or similar studies (exclude_studies) or particular participants. When a study has had an earlier ' +
+      'Prolific sample (e.g. a pilot), ask the researcher whether to exclude it. The study length comes from consent({ minutes }): to change ' +
+      'it, change the consent block. Run check_launch first and fix every fail. Afterwards, offer launch_prolific_study.',
+    inputSchema: {
+      study_id: z.string(),
+      places: z.number().int().min(1).max(2000).describe('How many participants to recruit'),
+      label: z.string().max(200).optional().describe('Label for the participant link, e.g. "Pilot" or "Main sample"'),
+      name: z.string().max(200).optional().describe('Advert title. Omit for the lab default; only change it if the researcher asks.'),
+      description: z.string().max(2000).optional().describe('Advert text. Omit for the lab default; only change it if the researcher asks.'),
+      exclude_studies: z.array(z.string()).max(200).default([])
+        .describe('Block anyone who took part in these: Prolific study ids (find them with list_prolific_studies) or Second Order study ids (all their Prolific studies)'),
+      exclude_participants: z.array(z.string()).max(5000).default([]).describe('Prolific participant ids to block'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, handled(async ({ study_id, ...args }, extra) => text(await createDraft(userOf(extra), study_id, args))));
+
+  server.registerTool('launch_prolific_study', {
+    title: 'Launch Prolific study',
+    description:
+      'Publish a Prolific draft so participants can take part. This spends the lab\'s money, so it takes two calls. Without confirm_code it ' +
+      'runs check_launch and returns a quote (places, pay, total cost with fees, budget left) and a confirm_code, spending nothing. ' +
+      'Show the researcher the whole quote and ask them to confirm. Only call again with confirm_code after they clearly say yes ' +
+      'in this conversation; never confirm on your own. Spending is capped per study and per researcher per month. ' +
+      'To go live later (e.g. US or UK daytime rather than Sydney\'s), give publish_at in the quote call; the quote shows the time in ' +
+      'Sydney, London and New York, and the confirmed launch is scheduled for it.',
+    inputSchema: {
+      study_id: z.string(),
+      prolific_id: z.string().optional().describe('Which Prolific study, if this study has more than one (see prolific_status)'),
+      publish_at: z.string().optional().describe('Schedule instead of launching now: ISO 8601 with a time zone, e.g. "2026-10-08T19:00:00+11:00". Only on the quote call; the confirm uses the quoted time.'),
+      confirm_code: z.string().optional().describe('From the quote, only after the researcher has said yes to it'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, handled(async ({ study_id, ...args }, extra) => text(await launch(userOf(extra), study_id, args))));
+
+  server.registerTool('add_prolific_places', {
+    title: 'Add Prolific places',
+    description:
+      'Recruit more participants on a Prolific study. On a launched study this spends money, so it takes two calls, like ' +
+      'launch_prolific_study: without confirm_code it returns a quote and a confirm_code; show the researcher and only call again with ' +
+      'the code after they clearly say yes. On a draft it just changes the number of places (nothing is spent until launch).',
+    inputSchema: {
+      study_id: z.string(),
+      places: z.number().int().min(1).max(2000).describe('How many places to add'),
+      prolific_id: z.string().optional(),
+      confirm_code: z.string().optional().describe('From the quote, only after the researcher has said yes to it'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, handled(async ({ study_id, ...args }, extra) => text(await addPlaces(userOf(extra), study_id, args))));
+
+  server.registerTool('list_prolific_studies', {
+    title: 'List Prolific studies',
+    description:
+      'The lab\'s recent Prolific studies (up to Prolific\'s latest 200), by title, with their Prolific ids and the Second Order study ' +
+      'they belong to if any. Use it to find similar studies whose participants to exclude in create_prolific_draft.',
+    inputSchema: { search: z.string().max(200).optional().describe('Words that must all appear in the title, e.g. "metacognition"') },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, handled(async (args) => text(await listProlificStudies(args))));
+
+  server.registerTool('prolific_status', {
+    title: 'Prolific status',
+    description: 'This study\'s Prolific studies: status, places, places taken, submissions, pay, money spent, completion URL and code, excluded studies, and the Prolific budget left (per study and yours this month).',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, handled(async ({ study_id }, extra) => text(await prolificStatus(userOf(extra), study_id))));
+
+  server.registerTool('set_prolific_status', {
+    title: 'Pause, resume or stop Prolific study',
+    description:
+      'Pause a live Prolific study (no new participants), resume it, stop it, or cancel a scheduled launch (it goes back to a draft ' +
+      'and its money back to the budget). Stopping ends recruitment for good: confirm with the researcher and set researcher_confirmed. ' +
+      'None of these spend money.',
+    inputSchema: {
+      study_id: z.string(),
+      action: z.enum(['pause', 'resume', 'stop', 'cancel_schedule']),
+      prolific_id: z.string().optional(),
+      researcher_confirmed: z.boolean().optional().describe('Needed to stop'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, handled(async ({ study_id, ...args }, extra) => text(await setProlificStatus(userOf(extra), study_id, args))));
 
   /* ---------- Consent and debrief library ---------- */
 

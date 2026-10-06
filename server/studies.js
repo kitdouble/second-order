@@ -122,6 +122,7 @@ const linkSummary = (link) => ({
   kind: link.kind,
   recruitment: link.recruitment,
   label: link.label,
+  ...(link.completion_url && { completion_url: link.completion_url }),
   status: link.closed_at ? `closed ${iso(link.closed_at)}` : 'open',
   ...(link.kind === 'live' ? runCounts('link_token', link.token) : {}),
 });
