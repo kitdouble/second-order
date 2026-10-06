@@ -17,7 +17,7 @@ import { qualityReport, setExclusionRules } from './quality.js';
 import { getDocument, listDocuments, saveDocument } from './documents.js';
 import { createDownloadLink, deleteData, deletionLog, summariseData } from './data.js';
 import { leaveFeedback, listFeedback, resolveFeedback } from './feedback.js';
-import { addPlaces, createDraft, launch, listProlificStudies, prolificStatus, setProlificStatus } from './prolific.js';
+import { addPlaces, createDraft, demographics, launch, listProlificStudies, prolificStatus, setProlificStatus } from './prolific.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
 const text = (value) => ({
@@ -481,6 +481,23 @@ export function buildServer() {
     inputSchema: { search: z.string().max(200).optional().describe('Words that must all appear in the title, e.g. "metacognition"') },
     annotations: { readOnlyHint: true, openWorldHint: true },
   }, handled(async (args) => text(await listProlificStudies(args))));
+
+  server.registerTool('get_prolific_demographics', {
+    title: 'Get Prolific demographics',
+    description:
+      'Prolific\'s demographic export for this study\'s Prolific samples, one CSV row per submission: submission and participant ids, ' +
+      'status, times, age, sex, ethnicity, countries, nationality, language, student and employment status, plus the matching Second ' +
+      'Order session (completed / stopped / incomplete / none, matched on the Prolific participant id, the participant_id in get_data). ' +
+      'Participant ids are pseudonymous; never try to identify anyone.',
+    inputSchema: {
+      study_id: z.string(),
+      prolific_id: z.string().optional().describe('One Prolific study; omit for all of this study\'s. Admins can give any of the lab\'s Prolific study ids.'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const { summary, csv } = await demographics(userOf(extra), study_id, args);
+    return text(`${summary}\n\n${csv}`);
+  }));
 
   server.registerTool('prolific_status', {
     title: 'Prolific status',

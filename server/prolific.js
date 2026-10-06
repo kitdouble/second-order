@@ -92,7 +92,7 @@ async function call(method, path, body) {
     const detail = json ? JSON.stringify(json.error ?? json).slice(0, 800) : text.slice(0, 300);
     throw new StudyError(`Prolific refused ${method} ${path} (${res.status}): ${detail}`, { platform: res.status >= 500 || res.status === 401 });
   }
-  return json;
+  return json ?? text;
 }
 
 // Filter choice ids differ from the labels people know, so look them up by label.
@@ -436,6 +436,69 @@ export async function addPlaces(user, studyId, { prolific_id, places, confirm_co
   await call('PATCH', `/studies/${row.prolific_id}/`, { total_available_places: total });
   record(user, row, 'places', places, cost);
   return { added: places, places_now: total, committed: gbp(cost), budget: budget(user, study.id) };
+}
+
+/* ---------- Demographics ---------- */
+
+const parseCsv = (text) => {
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') quoted = false; else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some(Boolean));
+};
+const csvCell = (v) => (v == null ? '' : /[",\n\r]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+
+/**
+ * Prolific's demographic export for a study's Prolific samples (all of them, or one), one row per submission,
+ * with the matching Second Order session's status (by Prolific participant id) added. Admins can also give
+ * any of the lab's Prolific study ids.
+ */
+export async function demographics(user, studyId, { prolific_id }) {
+  const study = findStudy(user, studyId, 'view');
+  let ids = db.prepare('SELECT prolific_id FROM prolific_studies WHERE study_id = ? ORDER BY created_at').all(study.id).map((r) => r.prolific_id);
+  if (prolific_id) {
+    if (!ids.includes(prolific_id) && user.role !== 'admin') {
+      throw new StudyError(`Prolific study ${prolific_id} wasn't made from "${study.title}", so it can't be read from here.`);
+    }
+    ids = [prolific_id];
+  }
+  if (!ids.length) throw new StudyError(`"${study.title}" has no Prolific studies made with create_prolific_draft. An admin can give a prolific_id.`);
+
+  const sessions = db.prepare(
+    `SELECT participant_id, finished_at, stopped FROM runs WHERE study_id = ? AND is_test = 0 AND participant_id IS NOT NULL ORDER BY started_at`
+  ).all(study.id);
+  const statusOf = new Map(sessions.map((r) => [r.participant_id, r.finished_at ? (r.stopped ? `stopped: ${r.stopped}` : 'completed') : 'incomplete']));
+
+  let header = null;
+  const out = [];
+  for (const id of ids) {
+    const csv = await call('POST', `/studies/${id}/demographic-export/`, { filters: [] });
+    const [head, ...rows] = parseCsv(typeof csv === 'string' ? csv : '');
+    if (!head) continue;
+    const pid = head.indexOf('Participant id');
+    header ??= ['Prolific study', ...head, 'Second Order session'];
+    for (const row of rows) {
+      const byName = Object.fromEntries(head.map((h, i) => [h, row[i]]));
+      out.push([id, ...header.slice(1, -1).map((h) => byName[h] ?? ''), statusOf.get(row[pid]) ?? 'none']);
+    }
+  }
+  const counts = out.reduce((acc, r) => ({ ...acc, [r.at(-1)]: (acc[r.at(-1)] ?? 0) + 1 }), {});
+  return {
+    summary: `${out.length} Prolific submissions from ${ids.length} Prolific stud${ids.length === 1 ? 'y' : 'ies'}; Second Order sessions: ` +
+      (Object.entries(counts).map(([k, n]) => `${n} ${k}`).join(', ') || 'none'),
+    csv: header ? [header, ...out].map((r) => r.map(csvCell).join(',')).join('\n') : '',
+  };
 }
 
 /* ---------- Status and pausing ---------- */

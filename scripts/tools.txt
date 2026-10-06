@@ -14,6 +14,7 @@ delete_version
 get_authoring_guide
 get_data
 get_document
+get_prolific_demographics
 get_study
 import_stimulus_from_url
 launch_prolific_study
