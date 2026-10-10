@@ -7,7 +7,7 @@ import { createInvite, db } from './db.js';
 import { config } from './config.js';
 import { requireMcpAuth } from './oauth.js';
 import { closeLink, createLink, createStudy, describeStudy, exportData, listMembers, listStudies, panelState, relabelLink, removeMember, shareStudy, StudyError, updateStudy } from './studies.js';
-import { collectGarbage, deleteSavedVersion, restoreVersion, saveVersion, storageReport, updateExperiment } from './live.js';
+import { collectGarbage, copyStudy, deleteSavedVersion, restoreVersion, saveVersion, storageReport, updateExperiment } from './live.js';
 import { CompileError } from './compile.js';
 import { authoringGuide } from './guide.js';
 import { addStimulus, copyStimuli, createUploadLink, importFromUrl, listStimuli, removeStimulus } from './stimuli.js';
@@ -63,7 +63,8 @@ export function buildServer() {
         'This is a rebuilt Second Order (October 2026): experiments are jsPsych modules, not YAML specs. Tools from the earlier ' +
         'version (guide/block catalogue via get, edit_spec, check qa/simulate/preview, review, prolific) no longer exist; ignore any ' +
         'memory of them (Prolific is now create_prolific_draft, launch_prolific_study, add_prolific_places, prolific_status).  Each study has one live experiment: update_experiment changes it immediately (open participant links ' +
-        'included); save_version stores a snapshot only when the researcher asks. Workflow: get_authoring_guide, create_study, ' +
+        'included); save_version stores a snapshot only when the researcher asks. A follow-up experiment (a new manipulation, sample ' +
+        'or replication that mostly reuses a design) is a separate study: make it with copy_study, not by editing the original. Workflow: get_authoring_guide, create_study, ' +
         'update_experiment, simulate, show_dashboard, check_launch, ' +
         'create_participant_link (or for Prolific create_prolific_draft then launch_prolific_study), study_status, quality_report, get_data (or summarise_data for large data sets). ' +
         'Never claim a study is collecting data unless get_study shows an open participant link with participants. ' +
@@ -129,7 +130,7 @@ export function buildServer() {
 
   server.registerTool('create_study', {
     title: 'Create study',
-    description: 'Create a new, empty study. Returns its id. Then write the experiment with update_experiment.',
+    description: 'Create a new, empty study. Returns its id. Then write the experiment with update_experiment. For a follow-up that reuses an existing study\'s design, use copy_study instead.',
     inputSchema: {
       title: z.string().min(1).max(120).describe('Researcher-facing title (participants never see it)'),
       description: z.string().max(2000).optional().describe('What the study is about: design, conditions, measures'),
@@ -137,9 +138,27 @@ export function buildServer() {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, handled(async (args, extra) => text(createStudy(userOf(extra), args))));
 
+  server.registerTool('copy_study', {
+    title: 'Start a follow-up study',
+    description:
+      'Create a new, separate study from an existing one\'s design, for a follow-up experiment, replication or new sample: the live ' +
+      'experiment (or a saved version), its stimulus files and exclusion rules. The original and its data are untouched, and each ' +
+      'study keeps its own participants and links; get_study shows which study a follow-up came from and the follow-ups of a study. ' +
+      'Use this rather than update_experiment when the change makes a different experiment (new conditions, manipulation or ' +
+      'measures), especially once the original has data; use update_experiment for fixes and tweaks to the same experiment. ' +
+      'Then make the changes on the new study with update_experiment.',
+    inputSchema: {
+      from_study_id: z.string().describe('The study to copy'),
+      title: z.string().min(1).max(120).describe('Title for the follow-up, e.g. "Stroop 2: no feedback"'),
+      description: z.string().max(2000).optional().describe('What this follow-up changes and why; defaults to the original\'s description'),
+      version: z.number().int().positive().optional().describe('Copy this saved version instead of the live experiment'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ from_study_id, ...args }, extra) => text(await copyStudy(userOf(extra), from_study_id, args))));
+
   server.registerTool('update_study', {
     title: 'Rename study',
-    description: 'Change a study\'s title or description, e.g. to tell a pilot apart from a later replication. The study id stays the same.',
+    description: 'Change a study\'s title or description, e.g. to make clear which experiment in a series it is. The study id stays the same. (A replication or follow-up is a new study: copy_study.)',
     inputSchema: {
       study_id: z.string(),
       title: z.string().min(1).max(120).optional().describe('New researcher-facing title'),
@@ -164,7 +183,9 @@ export function buildServer() {
       'Compile the complete experiment module and make it the study\'s live experiment, immediately, for everyone: preview, dashboard ' +
       'and open participant links (people part-way through keep their page; a reload restarts them on the new one). Always send the ' +
       'whole module, not a diff. If compilation fails nothing changes and the errors are returned. Follow get_authoring_guide. ' +
-      'Before a big change while participants are taking part, offer to save_version first.',
+      'Before a big change while participants are taking part, offer to save_version first. If the change makes a different ' +
+      'experiment (a follow-up with new conditions, manipulation or measures) rather than a fix, suggest copy_study so it becomes a ' +
+      'separate study and the original stays as it ran.',
     inputSchema: {
       study_id: z.string(),
       code: z.string().min(1).max(500_000).describe('The full experiment module (ES module, jsPsych v8)'),

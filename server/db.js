@@ -240,6 +240,9 @@ db.exec('CREATE INDEX IF NOT EXISTS runs_participant ON runs(study_id, participa
 
 addColumn('studies', 'exclusion_rules', 'TEXT'); // JSON, see quality.js
 addColumn('study_versions', 'documents', 'TEXT'); // consent/debrief texts fixed at save (documents.js)
+// Follow-up studies (copy_study): the study they were copied from, and from which revision or saved version.
+addColumn('studies', 'based_on', 'TEXT');
+addColumn('studies', 'based_on_from', 'TEXT');
 
 // Collaborators: owners (and admins) share a study with other accounts as editor or viewer.
 db.exec(`

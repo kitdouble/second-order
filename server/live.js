@@ -11,7 +11,7 @@ import { db, newId, newToken, now } from './db.js';
 import { compileExperiment } from './compile.js';
 import { currentManifest, FILES_DIR, fileUrl } from './stimuli.js';
 import { documentSnapshot } from './documents.js';
-import { findStudy, iso, StudyError } from './studies.js';
+import { createStudy, findStudy, iso, StudyError } from './studies.js';
 import { config } from './config.js';
 
 db.exec(`
@@ -170,6 +170,46 @@ export function deleteSavedVersion(user, studyId, { version, researcher_confirme
   const v = savedVersion(study.id, version);
   db.prepare('DELETE FROM saved_versions WHERE id = ?').run(v.id);
   return { deleted_version: `${v.number}: ${v.name}`, ...collectGarbage() };
+}
+
+/* ---------- Follow-up studies ---------- */
+
+// A new, separate study with another study's design: its live experiment (or a saved version), exactly
+// its stimulus files and its exclusion rules. Participants, links, data, saved versions and collaborators
+// stay with the original; the new study records which study it came from.
+export async function copyStudy(user, fromStudyId, { title, description, version }) {
+  const from = findStudy(user, fromStudyId);
+  const source = version != null ? savedVersion(from.id, version) : currentRevision(from.id);
+  if (!source) throw new StudyError(`"${from.title}" has no experiment yet, so there is nothing to copy. Use create_study for a new study.`);
+  const files = version != null ? JSON.parse(source.stimuli) : currentManifest(from.id);
+  const missing = Object.values(files).filter((sha) => !exists(sha));
+  if (missing.length) throw new StudyError(`${missing.length} of the stimulus files are missing from storage; the study can't be copied exactly.`, { platform: true });
+
+  const copiedFrom = version != null ? `saved version ${source.number} (${source.name})` : `revision ${source.number}`;
+  // Hand-picked exclusions name the original's participants, so they don't carry over.
+  const { exclude_participants: _excluded, ...rules } = from.exclusion_rules ? JSON.parse(from.exclusion_rules) : {};
+  const study = createStudy(user, {
+    title, description: description ?? from.description, basedOn: from.id, basedOnFrom: copiedFrom,
+    exclusionRules: Object.keys(rules).length ? JSON.stringify(rules) : null,
+  });
+  try {
+    const insert = db.prepare('INSERT INTO stimuli (study_id, name, sha256, size, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const [name, sha] of Object.entries(files)) insert.run(study.id, name, sha, sizeOf(sha), user.id, now());
+    const result = await updateExperiment(user, study.id, { code: source.code, notes: `Copied from "${from.title}" (${from.id}), ${copiedFrom}` });
+    return {
+      study_id: study.id,
+      title: study.title,
+      follow_up_of: { id: from.id, title: from.title, copied_from: copiedFrom },
+      ...result,
+      exclusion_rules: Object.keys(rules).length ? 'copied (without any participants excluded by hand)' : 'none set',
+      note: 'A separate study: no participants, links or saved versions yet, and the original is unchanged. Make the follow-up\'s ' +
+        'changes with update_experiment (and stimulus tools) on this study, then simulate and check_launch as usual. ' +
+        'Collaborators are not copied (share_study).',
+    };
+  } catch (err) {
+    db.prepare('DELETE FROM studies WHERE id = ?').run(study.id); // stimuli and links go with it
+    throw err;
+  }
 }
 
 /* ---------- Storage ---------- */

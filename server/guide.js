@@ -127,6 +127,9 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
    when an update will affect a study that is collecting data.
    Saved versions: only when the researcher asks, save_version stores a named snapshot (code and files) they
    can go back to with restore_version. Offer one before a big change during data collection.
+   Follow-ups: a new experiment that mostly reuses this design (a changed manipulation, extra condition, new
+   sample or replication) is a separate study. copy_study makes it (code, stimuli, exclusion rules) and records
+   where it came from; then edit the copy. Keep update_experiment on the original for fixes to that experiment.
 6. While collecting: study_status (completion, dropouts, browser errors). get_data returns trial rows as CSV
    in pages of whole sessions (follow next_offset; filter rows and pick columns to fit more per page; test
    data excluded unless include_test); create_download_link gives the researcher the full file

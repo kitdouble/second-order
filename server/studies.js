@@ -33,16 +33,16 @@ export const dashboardUrl = (previewToken) => `${config.runOrigin}/d/${previewTo
 
 /* ---------- Studies ---------- */
 
-export function createStudy(user, { title, description }) {
+export function createStudy(user, { title, description, basedOn = null, basedOnFrom = null, exclusionRules = null }) {
   const id = `${slugify(title)}-${randomBytes(3).toString('hex')}`;
-  db.prepare('INSERT INTO studies (id, title, description, owner_id, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(id, title.trim(), description?.trim() || null, user.id, now());
+  db.prepare('INSERT INTO studies (id, title, description, owner_id, created_at, based_on, based_on_from, exclusion_rules) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(id, title.trim(), description?.trim() || null, user.id, now(), basedOn, basedOnFrom, exclusionRules);
   return { id, title };
 }
 
 export function listStudies(user) {
   return db.prepare(
-    `SELECT s.id, s.title, u.name AS owner, s.created_at,
+    `SELECT s.id, s.title, u.name AS owner, s.created_at, s.based_on,
             CASE WHEN s.owner_id = ? OR ? = 'admin' THEN 'owner' ELSE m.role END AS your_role,
             (SELECT MAX(number) FROM study_versions v WHERE v.study_id = s.id) AS latest_version,
             (SELECT COUNT(*) FROM runs r WHERE r.study_id = s.id AND r.is_test = 0) AS participants,
@@ -51,7 +51,8 @@ export function listStudies(user) {
      LEFT JOIN study_members m ON m.study_id = s.id AND m.user_id = ?
      WHERE s.owner_id = ? OR ? = 'admin' OR m.user_id IS NOT NULL
      ORDER BY s.created_at DESC`
-  ).all(user.id, user.role, user.id, user.id, user.role).map((s) => ({ ...s, created_at: iso(s.created_at) }));
+  ).all(user.id, user.role, user.id, user.id, user.role)
+    .map(({ based_on, ...s }) => ({ ...s, created_at: iso(s.created_at), ...(based_on && { follow_up_of: based_on }) }));
 }
 
 // The id stays the same (links and data refer to it); only the researcher-facing title and description change.
@@ -138,6 +139,21 @@ function runCounts(column, value) {
   ).get(value);
 }
 
+// Where a follow-up came from, and the follow-ups copied from this study (only those the user can see).
+function lineage(user, study) {
+  const parent = study.based_on && db.prepare('SELECT * FROM studies WHERE id = ?').get(study.based_on);
+  const children = db.prepare('SELECT * FROM studies WHERE based_on = ? ORDER BY created_at').all(study.id)
+    .filter((s) => roleIn(user, s)).map((s) => ({ id: s.id, title: s.title, created: iso(s.created_at) }));
+  return {
+    ...(study.based_on && {
+      follow_up_of: parent && roleIn(user, parent)
+        ? { id: parent.id, title: parent.title, copied_from: study.based_on_from }
+        : { id: study.based_on, copied_from: study.based_on_from },
+    }),
+    ...(children.length && { follow_ups: children }),
+  };
+}
+
 /** The study and its live experiment (or, with savedVersion, that saved version's code). */
 export function describeStudy(user, studyId, savedVersion) {
   const study = findStudy(user, studyId);
@@ -150,6 +166,7 @@ export function describeStudy(user, studyId, savedVersion) {
     title: study.title,
     your_role: study.your_role,
     description: study.description,
+    ...lineage(user, study),
     participants: runCounts('study_id', study.id),
     participant_links: links.map(linkSummary),
     saved_versions: listSavedVersions(study.id),

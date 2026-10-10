@@ -3,6 +3,7 @@ add_stimulus
 check_launch
 close_participant_link
 copy_stimuli
+copy_study
 create_download_link
 create_invite
 create_participant_link
