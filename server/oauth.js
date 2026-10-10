@@ -19,7 +19,17 @@ const REQUEST_TTL = 10 * 60 * 1000;
 const CODE_TTL = 5 * 60 * 1000;
 const CIMD_CACHE_TTL = DAY;
 
-const isAllowedRedirect = (uri) => config.redirectAllowlist.some((prefix) => String(uri).startsWith(prefix));
+// Native clients (Zed, Claude Code) use loopback redirects, registered with or without a port (RFC 8252).
+const isLoopback = (uri) => {
+  try {
+    const url = new URL(uri);
+    return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  } catch {
+    return false;
+  }
+};
+const isAllowedRedirect = (uri) =>
+  isLoopback(uri) || config.redirectAllowlist.some((prefix) => String(uri).startsWith(prefix));
 
 // Tokens are only good for this server's MCP endpoint (RFC 8707 audience).
 function checkResource(resource) {
