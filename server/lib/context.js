@@ -7,6 +7,8 @@ export const context = {
   jsPsych: null,
   // Replaced by the runtime (server-balanced), the simulator (rotates) and the dashboard (random).
   assign: async (_name, conditions) => conditions[Math.floor(Math.random() * conditions.length)],
+  // Replaced by the runtime, which asks the server for a real code; the simulator and dashboard show this one.
+  esmCode: async (_study) => "SO-TEST-CODE",
 };
 
 export const setContext = (values) => Object.assign(context, values);

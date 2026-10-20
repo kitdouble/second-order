@@ -5,6 +5,7 @@ close_participant_link
 copy_stimuli
 copy_study
 create_download_link
+create_esm_codes
 create_invite
 create_participant_link
 create_prolific_draft
@@ -12,6 +13,7 @@ create_study
 create_upload_link
 delete_participant_data
 delete_version
+esm_status
 get_authoring_guide
 get_data
 get_document
@@ -36,6 +38,7 @@ resolve_feedback
 restore_version
 save_document
 save_version
+set_esm_schedule
 set_exclusion_rules
 set_prolific_status
 share_study

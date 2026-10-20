@@ -18,6 +18,7 @@ import { getDocument, listDocuments, saveDocument } from './documents.js';
 import { createDownloadLink, deleteData, deletionLog, summariseData } from './data.js';
 import { leaveFeedback, listFeedback, resolveFeedback } from './feedback.js';
 import { addPlaces, createDraft, demographics, launch, listProlificStudies, prolificStatus, setProlificStatus } from './prolific.js';
+import { createCodes, esmStatus, setSchedule } from './esm.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
 const text = (value) => ({
@@ -67,6 +68,7 @@ export function buildServer() {
         'or replication that mostly reuses a design) is a separate study: make it with copy_study, not by editing the original. Workflow: get_authoring_guide, create_study, ' +
         'update_experiment, simulate, show_dashboard, check_launch, ' +
         'create_participant_link (or for Prolific create_prolific_draft then launch_prolific_study), study_status, quality_report, get_data (or summarise_data for large data sets). ' +
+        'ESM / EMA (experience sampling through the MetaForge phone app): set_esm_schedule, create_esm_codes or the esmCode block, esm_status. ' +
         'Never claim a study is collecting data unless get_study shows an open participant link with participants. ' +
         'Second Order is new: when a tool fails, behaves unexpectedly, is missing something you needed, or its description or the ' +
         'guide misled you, call leave_feedback with a short note for the maintainers (no participant data). Do this without asking, ' +
@@ -436,6 +438,69 @@ export function buildServer() {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, handled(async ({ study_id, ...rules }, extra) => text(setExclusionRules(userOf(extra), study_id,
     Object.fromEntries(Object.entries(rules).filter(([, v]) => v !== undefined))))));
+
+  /* ---------- ESM / EMA (phone app) ---------- */
+
+  server.registerTool('set_esm_schedule', {
+    title: 'Set ESM schedule',
+    description:
+      'Make a study an ESM / EMA (experience sampling) study, or change its schedule. Participants take part through the MetaForge phone ' +
+      'app ("MetaForge Live" on iPhone, "MetaForge EMA" on Android): they enter a code, get notifications on this schedule, and each ' +
+      'notification opens the study\'s live experiment as one short session (keep it to a minute or two, phone-friendly, no consent or ' +
+      'device check each time; consent belongs in an intake study). Write that survey with update_experiment first. Only given fields ' +
+      'change; the rest keep their current values (MetaForge defaults at first: random, 4 a day, 7 days, 09:00-20:00, 60 min apart, ' +
+      'open 30 min). Each participant keeps the schedule they enrolled with, so changes reach only people who enrol afterwards. ' +
+      'Then give out codes: create_esm_codes, or the esmCode block in an intake study (get_authoring_guide). Track with esm_status. ' +
+      'To end the study, close its "ESM app sessions" link with close_participant_link (new sessions and enrolments are refused).',
+    inputSchema: {
+      study_id: z.string(),
+      app_title: z.string().min(1).max(80).optional().describe('Study name participants see in the app (required the first time)'),
+      schedule_type: z.enum(['random', 'fixed']).optional().describe('random: prompts at random times in the window, at least min_gap_minutes apart. fixed: evenly spaced through the window'),
+      prompts_per_day: z.number().int().min(1).max(20).optional(),
+      days: z.number().int().min(1).max(365).optional().describe('How many days the study runs from enrolment'),
+      start_time: z.string().optional().describe('Daily window start, 24-hour "HH:mm" in the participant\'s own time zone'),
+      end_time: z.string().optional().describe('Daily window end, "HH:mm"'),
+      min_gap_minutes: z.number().int().min(1).max(1440).optional().describe('Minimum minutes between random prompts'),
+      expires_after_minutes: z.number().int().min(1).max(1440).optional().describe('How long each prompt\'s survey stays open'),
+      goal_sessions: z.number().int().min(1).max(10000).nullable().optional().describe('End the study for a participant after this many completed sessions (null: no goal)'),
+      contact_email: z.string().email().nullable().optional().describe('Shown in the app as "contact researcher" (null: no contact button). Only set what the researcher gives you'),
+      show_next_prompt_time: z.boolean().optional().describe('Show participants when their next prompt is due'),
+      allow_reschedule: z.boolean().optional().describe('Let participants see the full schedule and reschedule prompts'),
+      start_tomorrow: z.boolean().optional().describe('No prompts on the day of enrolment'),
+      start_with_survey: z.boolean().optional().describe('Offer a first survey straight after enrolment'),
+      one_survey_per_day: z.boolean().optional().describe('After one completed survey, cancel the rest of that day\'s prompts'),
+      participant_initiated: z.boolean().optional().describe('Event-contingent: participants open a survey themselves when the event happens, as well as or instead of prompts'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(setSchedule(userOf(extra), study_id, args))));
+
+  server.registerTool('create_esm_codes', {
+    title: 'Create ESM codes',
+    description:
+      'Single-use enrolment codes (like SO-K7M2-QX9P) for an ESM study, one per participant, for the researcher to send out (for codes ' +
+      'given inside an intake study, use the esmCode block instead). test: true makes codes whose sessions run the preview and are saved ' +
+      'as test data: give the researcher one to try the app themselves before launching.',
+    inputSchema: {
+      study_id: z.string(),
+      count: z.number().int().min(1).max(500).default(1),
+      test: z.boolean().default(false),
+      label: z.string().max(120).optional().describe('e.g. "Lab pilot", kept with the codes and shown in esm_status'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(createCodes(userOf(extra), study_id, args))));
+
+  server.registerTool('esm_status', {
+    title: 'ESM status',
+    description:
+      'An ESM study\'s schedule, codes issued / unused / enrolled / withdrawn, and per participant: platform, enrolment and end dates, ' +
+      'sessions started and completed, approximate compliance, last session, and the intake study and participant (e.g. Prolific PID) ' +
+      'the code was issued to. Use with study_status (browser errors) and get_data (session rows) while the study runs.',
+    inputSchema: {
+      study_id: z.string(),
+      include_test: z.boolean().default(false).describe('Include test-code enrolments'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(esmStatus(userOf(extra), study_id, args))));
 
   /* ---------- Prolific ---------- */
 

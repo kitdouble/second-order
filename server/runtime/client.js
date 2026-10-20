@@ -138,6 +138,8 @@ export async function start(experiment) {
         const { redirect } = await post(`/api/runs/${run.id}/finish`, { key: run.key, stopped });
         resumeToken.clear();
         if (stopped) return message('');
+        // Inside the ESM phone app (iOS, and Android through its shim): the session now counts.
+        window.webkit?.messageHandlers?.surveyComplete?.postMessage('completed');
         if (redirect) return window.location.replace(redirect);
         message(live
           ? '<p>Thank you, you have finished the study. You can close this window.</p>'
@@ -156,6 +158,7 @@ export async function start(experiment) {
     assign: async (name, conditions) => (await post(`/api/runs/${run.id}/assign`, {
       key: run.key, name, conditions, ...(!live && query.get(name) != null && { chosen: query.get(name) }),
     })).value,
+    esmCode: async (study) => (await post(`/api/runs/${run.id}/esm-code`, { key: run.key, study }, { retries: 2 })).code,
   });
 
   let nodes;

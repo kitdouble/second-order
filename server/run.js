@@ -8,6 +8,8 @@ import { FILES_DIR, MIME, fileUrl } from './stimuli.js';
 import { compileDashboard, RUNTIME_VERSION } from './compile.js';
 import { currentRevision, ensureCurrent } from './live.js';
 import { documentSnapshot } from './documents.js';
+import { appRun, codeForRun, esmApp } from './esm.js';
+import { StudyError } from './studies.js';
 
 const MAX_TRIAL_BYTES = 5 * 1024 * 1024; // audio/video/sketchpad responses can be large
 const MAX_RUN_BYTES = 100 * 1024 * 1024;
@@ -209,6 +211,23 @@ runApp.post('/api/runs', (req, res) => {
   const userAgent = String(req.get('user-agent') ?? '').slice(0, 300);
   const revisionId = currentRevision(link.study_id)?.id;
   if (!revisionId) return fail(res, 404, 'This study is not ready yet.');
+
+  // ESM: the phone app opens a session per prompt, so one participant has many runs.
+  const app = appRun(link, given);
+  if (app) {
+    const session = { participantId: app.participantId, params: app.params, userAgent, revisionId };
+    if (link.kind === 'preview') return res.json(startRun(link, session));
+    if (!app.participantId) return fail(res, 400, 'Please open this survey from the study app.');
+    // A reload continues this prompt's session, never an earlier prompt's.
+    const unfinished = db.prepare(
+      `SELECT * FROM runs WHERE participant_id = ? AND link_token = ? AND finished_at IS NULL AND started_at > ?
+         AND json_extract(params, '$.sessionNumber') IS ? AND json_extract(params, '$.notificationTime') IS ?
+       ORDER BY started_at DESC LIMIT 1`
+    ).get(app.participantId, link.token, now() - RESUME_WINDOW, app.params.sessionNumber ?? null, app.params.notificationTime ?? null);
+    if (unfinished?.version_id === revisionId) return res.json(resumeRun(unfinished));
+    return res.json(startRun(link, session));
+  }
+
   if (link.kind === 'preview') return res.json(startRun(link, { participantId, params, userAgent, revisionId }));
 
   if (rules.id && (!participantId || participantId.includes('%'))) {
@@ -330,6 +349,18 @@ runApp.post('/api/runs/:id/assign', (req, res) => {
   }
 });
 
+// The esmCode block: an enrolment code for an ESM study, the same one each time for this run.
+runApp.post('/api/runs/:id/esm-code', (req, res) => {
+  const run = ownedRun(req, res);
+  if (!run) return;
+  try {
+    res.json({ code: codeForRun(run, req.body.study) });
+  } catch (err) {
+    if (err instanceof StudyError) return fail(res, 400, err.message);
+    throw err;
+  }
+});
+
 // The completion URL is only revealed here, so it can't be read before doing the study. Runs a block
 // stopped early (wrong device, stimuli failed to load) end without it.
 runApp.post('/api/runs/:id/finish', (req, res) => {
@@ -343,5 +374,8 @@ runApp.post('/api/runs/:id/finish', (req, res) => {
   if (redirect && link.recruitment === 'sona') redirect = redirect.replace('XXXX', encodeURIComponent(run.participant_id));
   res.json({ redirect });
 });
+
+// The MetaForge phone apps' endpoints, for ESM studies.
+runApp.use(esmApp);
 
 runApp.use((_req, res) => res.status(404).type('text').send('Not found'));

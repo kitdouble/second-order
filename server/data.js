@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { db, hash, newToken, now } from './db.js';
 import { config } from './config.js';
 import { exportData, findStudy, iso, StudyError } from './studies.js';
+import { forgetParticipant } from './esm.js';
 
 const DOWNLOAD_MINUTES = 60;
 
@@ -72,6 +73,7 @@ export function deleteData(user, studyId, { participant_id, run_id, test_data = 
   try {
     // Trials, events and assignments go with their runs (foreign keys cascade).
     db.prepare(`DELETE FROM runs WHERE study_id = ? AND ${where}`).run(study.id, ...args);
+    if (participant_id) forgetParticipant(study.id, String(participant_id)); // ESM: ends the app enrolment too
     db.prepare('INSERT INTO deletions (study_id, runs, participant_id_hash, scope, reason, deleted_by, at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(study.id, runs.length, participant_id ? pidHash(participant_id) : null, scope, reason?.slice(0, 500) ?? null, user.id, now());
     db.exec('COMMIT');

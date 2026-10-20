@@ -106,6 +106,34 @@ return [deviceCheck({ devices: ["computer"] }), consent({ minutes: 15 }), demogr
   and researcher_confirmed: true. Live experiments using that document pick it up automatically.
 - Previews show the Prolific version of the blocks; add ?recruitment=sona to a preview link for the SONA one.
 
+## ESM / EMA studies (experience sampling on participants' phones)
+
+Participants use the MetaForge phone app ("MetaForge Live" on iPhone, "MetaForge EMA" on Android). They enter a
+single-use code, the app sends notifications on the study's schedule, and each notification opens the study's live
+experiment as one session. Set up:
+
+1. A study for the momentary survey: create_study, then update_experiment with a short, phone-friendly timeline
+   (a minute or two: sliders, buttons, short text; no deviceCheck, consent, fullscreen or debrief, which belong in
+   an intake study). Each session is a run with param_participant, param_sessionNumber, param_notificationTime and
+   param_timezone in get_data. Keep top-level items short, as for any study.
+2. set_esm_schedule (app_title, schedule_type, prompts_per_day, days, daily window, gaps, expiry, …).
+3. Codes, either from create_esm_codes (the researcher sends them out; test: true for trying it on their own phone)
+   or from the esmCode block in a separate intake study (consent, baseline measures, then the code). The intake
+   study can be recruited on Prolific or SONA as usual; esm_status shows which intake participant got which code.
+
+\`\`\`js
+import { consent, demographics, esmCode } from "second-order";
+// in the intake study's buildTimeline:
+return [consent({ minutes: 10 }), demographics(), ...baseline, esmCode({ study: "my-diary-ab12cd" })];
+\`\`\`
+
+- esmCode({ study, instructions, button_label }): the ESM study's id is required, and that study must have an ESM
+  schedule and the same owner (or one the intake study's owner can edit). It shows the code with install and
+  enter instructions (instructions replaces them; HTML with {code} where the code goes) and saves esm_code.
+  Previews issue test codes; simulate and the dashboard show SO-TEST-CODE.
+- Track with esm_status (enrolled, sessions, compliance) and study_status. Close the "ESM app sessions" link
+  (close_participant_link) to end the study.
+
 ## Stimuli
 
 Images, audio, video and CSV/JSON/text files are uploaded to the study (create_upload_link for files the

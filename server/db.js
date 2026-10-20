@@ -256,6 +256,38 @@ db.exec(`
   );
 `);
 
+// ESM / EMA studies, run through the MetaForge phone apps (esm.js). A study with a schedule has one live
+// link its app sessions run on; enrolment codes are single use and fix the schedule when used.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS esm_studies (
+    study_id    TEXT PRIMARY KEY REFERENCES studies(id) ON DELETE CASCADE,
+    app_title   TEXT NOT NULL,              -- the study name participants see in the app
+    schedule    TEXT NOT NULL,              -- JSON scheduleParams, as the apps read them
+    link_token  TEXT NOT NULL REFERENCES links(token),
+    updated_by  TEXT NOT NULL REFERENCES users(id),
+    updated_at  INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS esm_codes (
+    code                   TEXT PRIMARY KEY,   -- canonical, e.g. SOK7M2QX9P (shown as SO-K7M2-QX9P)
+    study_id               TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
+    is_test                INTEGER NOT NULL,
+    label                  TEXT,
+    created_by             TEXT,               -- the researcher, for codes from create_esm_codes
+    source_run_id          TEXT,               -- or the run whose esmCode trial issued it
+    source_study_id        TEXT,
+    source_participant_id  TEXT,               -- e.g. the Prolific PID in that study
+    created_at             INTEGER NOT NULL,
+    participant_id         TEXT UNIQUE,        -- set when the code is used in the app
+    schedule               TEXT,               -- scheduleParams fixed at enrolment
+    device                 TEXT,
+    enrolled_at            INTEGER,
+    withdrawn_at           INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS esm_codes_study ON esm_codes(study_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS esm_codes_source ON esm_codes(source_run_id, study_id) WHERE source_run_id IS NOT NULL;
+`);
+
 export const now = () => Date.now();
 export const DAY = 24 * 60 * 60 * 1000;
 export const newId = () => randomUUID();

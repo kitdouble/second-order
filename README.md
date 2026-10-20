@@ -83,6 +83,7 @@ placeholder from your documents.
 | `add_stimulus` / `import_stimulus_from_url` | owner, admin | add generated or public files |
 | `create_participant_link` | owner, admin | Prolific / SONA / lab link pinned to one version |
 | `close_participant_link` / `update_participant_link` | owner, admin | stop accepting participants / relabel a link |
+| `set_esm_schedule` / `create_esm_codes` / `esm_status` | editor (status: viewer) | ESM / EMA through the MetaForge phone apps: schedule, enrolment codes, enrolment and compliance |
 | `get_data` | owner, admin | trial rows as CSV (test data excluded by default) |
 | `summarise_data` | viewer | per-group (participant, condition) n, mean, sd, median or share true, computed on the server |
 | `list_users` / `create_invite` | admin | accounts and invites |
