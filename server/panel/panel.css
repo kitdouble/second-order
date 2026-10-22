@@ -192,6 +192,31 @@ h3:first-child {
   color: var(--text-2);
 }
 
+/* ESM: a notification as the participant sees it */
+.notification {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 340px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.notification strong {
+  font-size: 12px;
+}
+
+.notification span {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+tr.current td {
+  background: var(--surface-2);
+}
+
 /* Stat tiles */
 .tiles {
   display: flex;

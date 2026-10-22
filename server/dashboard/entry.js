@@ -3,8 +3,8 @@
 // Nothing is sent to the server: dashboard runs are for checking, not data.
 //
 // Routes (URL hash): none = timeline, #full, #from-2.1, #only-3. ?recruitment=sona|lab switches blocks;
-// ?condition=speed (or ?<name>=… for assignCondition(…, { name })) picks the condition. Both are kept in the
-// query string, so they stay the same across the reloads that open each view.
+// ?condition=speed (or ?<name>=… for assignCondition(…, { name })) picks the condition, and ?session=3 the
+// session of an experience sampling study (the experiment's `esm` export). All are kept in the query string, so they stay the same across the reloads that open each view.
 import 'jspsych/css/jspsych.css';
 import 'second-order:runtime.css';
 import './dashboard.css';
@@ -14,6 +14,7 @@ import { setContext } from '../lib/context.js';
 import { exitFullscreen } from '../lib/blocks/device.js';
 import { nameStimulus } from '../lib/stimuli.js';
 import { stopMessage } from '../lib/blocks/stop.js';
+import { describeEsm, sessionNumber } from './esm.js';
 import { describeTimeline, findItem, formatPath, labelsAlong, parsePath, sliceFrom, sliceOnly } from './timeline.js';
 
 const config = JSON.parse(document.getElementById('so-config').textContent);
@@ -32,7 +33,12 @@ async function assign(name, conditions) {
   return value;
 }
 
-const context = { mode: 'preview', recruitment, version: config.version, assign };
+// Experience sampling: the experiment's `esm` export, and which of its sessions this page runs.
+const esm = describeEsm(experiment.esm);
+const session = sessionNumber(query.get('session'), esm);
+const sessionLabel = () => (esm ? `session ${session} of ${esm.sessions.length}` : '');
+
+const context = { mode: 'preview', recruitment, version: config.version, session, assign };
 setContext(context);
 
 // This page's URL with one query parameter changed, keeping the others and the current view.
@@ -129,7 +135,15 @@ function conditionSwitches() {
     conditions.map((c) => el('a', { class: c === value ? 'active' : null, href: withParam(paramFor(name), c) }, c))));
 }
 
-const switches = () => el('div', { class: 'db-switches' }, recruitmentSwitch(), conditionSwitches());
+function sessionSwitch() {
+  if (!esm?.sessions.length) return null;
+  return el('div', { class: 'db-switch', role: 'group', 'aria-label': 'Session to run' },
+    el('span', { class: 'db-switch-label' }, 'session'),
+    esm.sessions.slice(0, 12).map((s) => el('a', { class: s.number === session ? 'active' : null, href: withParam('session', s.number), title: s.name }, String(s.number))),
+    esm.sessions.length > 12 ? el('span', { class: 'db-switch-label' }, `of ${esm.sessions.length}; ?session=N for others`) : null);
+}
+
+const switches = () => el('div', { class: 'db-switches' }, recruitmentSwitch(), sessionSwitch(), conditionSwitches());
 
 function summary() {
   const plugins = Object.keys(config.packages).filter((p) => p.startsWith('@jspsych/'));
@@ -137,6 +151,7 @@ function summary() {
     el('li', {}, el('strong', {}, `jsPsych ${config.packages.jspsych ?? '?'}`), `${plugins.length} plugin${plugins.length === 1 ? '' : 's'}`),
     el('li', {}, el('strong', {}, String(config.stimuli.length)), `stimul${config.stimuli.length === 1 ? 'us' : 'i'}`),
     el('li', {}, el('strong', {}, RECRUITMENT[recruitment]), 'blocks shown'),
+    esm ? el('li', {}, el('strong', {}, `${session} / ${esm.sessions.length}`), 'session shown') : null,
     assignments.size ? el('li', {}, el('strong', {}, conditionText()), assignments.size === 1 ? 'condition' : 'conditions') : null);
 }
 
@@ -175,7 +190,7 @@ async function run(mode, path, items) {
     el('div', { class: 'db-runbar' },
       el('button', { type: 'button', onclick: () => go('') }, '← Timeline'),
       el('span', {}, el('strong', {}, MODE_LABELS[mode]), path ? ` · ${formatPath(path)} ${where}` : '',
-        assignments.size ? ` · ${conditionText()}` : ''),
+        esm ? ` · ${sessionLabel()}` : '', assignments.size ? ` · ${conditionText()}` : ''),
       noteToggle(path ? `item ${formatPath(path)} (${where})` : 'the full experiment'),
       el('button', { type: 'button', onclick: () => location.reload() }, 'Restart')),
     stage);
@@ -232,14 +247,14 @@ function describeRun(rows, mode, path, items, stopped) {
   const columns = [...new Set(rows.flatMap(Object.keys))];
   // Hashed file URLs are noise for Claude once stimulus_name is there.
   const sample = JSON.stringify(rows.slice(0, 3).map(({ stimulus, ...row }) => (row.stimulus_name ? row : { stimulus, ...row }))).slice(0, 1200);
-  return `${what} with the ${RECRUITMENT[recruitment]} blocks${assignments.size ? ` in condition ${conditionText()}` : ''}: ${rows.length} rows, ${stopped ? `stopped early (${stopped})` : 'finished normally'}. ` +
+  return `${what} with the ${RECRUITMENT[recruitment]} blocks${esm ? ` for ${sessionLabel()}` : ''}${assignments.size ? ` in condition ${conditionText()}` : ''}: ${rows.length} rows, ${stopped ? `stopped early (${stopped})` : 'finished normally'}. ` +
     `Columns: ${columns.join(', ')}. First rows: ${sample}`;
 }
 
 function finished(rows, mode, path, items) {
   const stopped = rows.find((r) => r.stopped)?.stopped;
   toPanel({ type: 'second-order:run', summary: describeRun(rows, mode, path, items, stopped) });
-  const stem = `r${config.version}-${mode}${path ? `-${formatPath(path)}` : ''}${[...assignments.values()].map((a) => `-${a.value}`.replace(/[^\w.-]+/g, '_')).join('')}`;
+  const stem = `r${config.version}-${mode}${path ? `-${formatPath(path)}` : ''}${(esm ? `-s${session}` : '') + [...assignments.values()].map((a) => `-${a.value}`.replace(/[^\w.-]+/g, '_')).join('')}`;
   const columns = [...new Set(rows.flatMap(Object.keys))];
   const shown = rows.slice(0, 200);
 
@@ -267,7 +282,10 @@ function finished(rows, mode, path, items) {
 /* ---------- Start ---------- */
 
 // Tell the chat panel the dashboard rendered, and how big it is, so it can tell a blank embed apart.
-const announce = () => toPanel({ type: 'second-order:ready', width: window.innerWidth, height: window.innerHeight });
+const announce = () => {
+  toPanel({ type: 'second-order:ready', width: window.innerWidth, height: window.innerHeight });
+  toPanel({ type: 'second-order:esm', esm, session }); // null for studies that aren't experience sampling
+};
 
 (async () => {
   setTimeout(announce, 0);

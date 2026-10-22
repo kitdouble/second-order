@@ -2,6 +2,8 @@
 //
 //   Try it      the live experiment's dashboard (run origin), embedded
 //   Study       participant status, links, the live experiment and saved versions, stimuli
+//   ESM         experience sampling studies only: the notifications and sessions the experiment declares,
+//               with a button to preview any one session in the dashboard
 //   Simulation  the last simulate result: participant outcomes and value counts per column
 //
 // Talks to the host with a small hand-written JSON-RPC bridge, and to the embedded dashboard with
@@ -25,7 +27,7 @@ const request = (method, params = {}) =>
   });
 
 let caps = {};
-const state = { study: null, simulation: null, check: null, quality: null, tab: 'try' };
+const state = { study: null, simulation: null, check: null, quality: null, esm: null, frameUrl: null, previewed: null, tab: 'try' };
 
 window.addEventListener('message', (event) => {
   if (event.origin === RUN_ORIGIN && event.source === $('#frame').contentWindow) return fromDashboard(event.data);
@@ -52,7 +54,7 @@ function applyContext(context = {}) {
   if (max) document.documentElement.style.setProperty('--frame-height', `${Math.max(320, Math.min(620, max - 130))}px`);
   if (context.displayMode) {
     // A dashboard that couldn't show inline usually can once it has room (our button or the host's).
-    if (context.displayMode !== 'inline' && state.study && !$('#try-fallback').hidden) loadFrame();
+    if (context.displayMode !== 'inline' && state.study && !$('#try-fallback').hidden) loadFrame(state.previewed);
     document.body.classList.toggle('fullscreen', context.displayMode === 'fullscreen');
     $('#full').textContent = context.displayMode === 'fullscreen' ? 'Exit fullscreen' : 'Fullscreen';
   }
@@ -118,6 +120,7 @@ function render(reloadFrame) {
 
 
   $('#open').disabled = false;
+  if (reloadFrame) state.esm = null; // the dashboard reports it again once it has loaded
   $('#tab-sim').hidden = !state.simulation;
   if (state.simulation) $('#tab-sim .count').textContent = state.simulation.revision === study.revision ? '' : ' (earlier)';
   if (reloadFrame) loadFrame();
@@ -125,10 +128,11 @@ function render(reloadFrame) {
   $('#tab-check').hidden = !state.check;
   $('#tab-quality').hidden = !state.quality;
   renderStudy();
+  renderEsm();
   if (state.simulation) renderSimulation();
   if (state.check) renderCheck();
   if (state.quality) renderQuality();
-  const missing = { sim: !state.simulation, check: !state.check, quality: !state.quality };
+  const missing = { sim: !state.simulation, check: !state.check, quality: !state.quality, esm: !state.esm };
   selectTab(missing[state.tab] ? 'try' : state.tab);
 }
 
@@ -278,6 +282,47 @@ const chart = ([column, { unit, counts }]) => {
       el('td', { class: 'value' }, String(n)))))));
 };
 
+/* ESM: what participants are sent, and a way to try any session. */
+function previewSession(number) {
+  loadFrame(number);
+  selectTab('try');
+}
+
+function notificationCard(n) {
+  return n
+    ? el('div', { class: 'notification' }, el('strong', {}, n.title ?? ''), el('span', {}, n.body ?? ''))
+    : el('span', { class: 'muted' }, 'No notification text');
+}
+
+function renderEsm() {
+  const { esm } = state.esm ?? {};
+  $('#tab-esm').hidden = !esm;
+  if (!esm) return $('#view-esm').replaceChildren();
+  const tile = (value, label) => el('div', { class: 'tile' }, el('strong', {}, String(value ?? '–')), el('span', {}, label));
+  $('#tab-esm .count').textContent = ` (${esm.sessions.length})`;
+  $('#view-esm').replaceChildren(el('div', { class: 'pad' },
+    el('h3', {}, 'Experience sampling'),
+    el('div', { class: 'tiles' },
+      tile(esm.sessions.length, esm.sessions.length === 1 ? 'session' : 'sessions'),
+      tile(esm.expires_minutes != null ? `${esm.expires_minutes}m` : null, 'open for')),
+    el('h3', {}, 'Notification'),
+    esm.notification ? notificationCard(esm.notification) : el('p', { class: 'muted' }, 'No default notification. Sessions can set their own.'),
+    el('h3', {}, 'Sessions'),
+    esm.sessions.length
+      ? el('div', { class: 'scroll' }, el('table', { class: 'grid' },
+          el('thead', {}, el('tr', {}, ['#', 'Session', 'When', 'Notification', 'Open for', ''].map((h) => el('th', {}, h)))),
+          el('tbody', {}, esm.sessions.map((s) => el('tr', { class: s.number === state.previewed ? 'current' : null },
+            el('td', {}, String(s.number)),
+            el('td', {}, s.name),
+            el('td', {}, s.time ?? '–'),
+            el('td', {}, notificationCard(s.notification)),
+            el('td', {}, s.expires_minutes != null ? `${s.expires_minutes} min` : '–'),
+            el('td', {}, el('button', { class: 'btn', type: 'button', onclick: () => previewSession(s.number) },
+              s.number === state.previewed ? 'Previewing' : 'Preview')))))))
+      : el('p', { class: 'muted' }, 'The experiment declares no sessions. Set `sessions` in its `esm` export.'),
+    el('p', { class: 'muted' }, 'Preview runs the experiment as that session (context.session) in the dashboard. Nothing is saved or sent.')));
+}
+
 /* Simulation: outcomes per participant, then a small single-hue bar chart per column. */
 function renderSimulation() {
   const sim = state.simulation;
@@ -330,10 +375,21 @@ document.addEventListener('mousemove', (e) => {
 // or reports no real size, show a card that opens it fullscreen or in the browser instead.
 let readyTimer = null;
 
-function loadFrame() {
+// A session number opens the dashboard on that session of an ESM study, running it straight away.
+function loadFrame(session = null) {
   $('#try-fallback').hidden = true;
   $('#frame').hidden = false;
-  $('#frame').src = state.study.dashboard_url;
+  state.previewed = session;
+  if (session) {
+    const url = new URL(state.study.dashboard_url);
+    url.searchParams.set('session', session);
+    url.hash = 'full';
+    state.frameUrl = url.href;
+  } else {
+    state.frameUrl = state.study.dashboard_url;
+  }
+  $('#frame').src = state.frameUrl;
+  if (state.esm) renderEsm();
   clearTimeout(readyTimer);
   readyTimer = setTimeout(() => showFallback('The dashboard did not load here.'), 6000);
 }
@@ -353,7 +409,7 @@ function dashboardReady({ width, height }) {
 
 $('#try-full').addEventListener('click', () => $('#full').click());
 $('#try-open').addEventListener('click', () => $('#open').click());
-$('#try-again').addEventListener('click', () => state.study && loadFrame());
+$('#try-again').addEventListener('click', () => state.study && loadFrame(state.previewed));
 
 /* ---------- Dashboard <-> Claude ---------- */
 
@@ -372,6 +428,10 @@ const where = () => `${state.study.title} (revision ${state.study.revision})`;
 function fromDashboard(data) {
   if (data?.type === 'second-order:ready') {
     dashboardReady(data);
+  } else if (data?.type === 'second-order:esm') {
+    state.esm = data.esm ? data : null;
+    renderEsm();
+    sizeChanged();
   } else if (data?.type === 'second-order:download') {
     const { filename, mimeType, text } = data;
     request('ui/download-file', { contents: [{ type: 'resource', resource: { uri: `file:///${filename}`, mimeType, text } }] }).catch(() => {});
@@ -404,7 +464,7 @@ $('#feedback').addEventListener('submit', async (e) => {
 /* ---------- Controls ---------- */
 
 for (const button of document.querySelectorAll('.tabs button')) button.addEventListener('click', () => selectTab(button.dataset.tab));
-$('#open').addEventListener('click', () => state.study && request('ui/open-link', { url: state.study.dashboard_url }).catch(() => {}));
+$('#open').addEventListener('click', () => state.study && request('ui/open-link', { url: state.frameUrl ?? state.study.dashboard_url }).catch(() => {}));
 $('#full').addEventListener('click', () =>
   request('ui/request-display-mode', { mode: document.body.classList.contains('fullscreen') ? 'inline' : 'fullscreen' })
     .then((r) => applyContext({ displayMode: r?.mode }))

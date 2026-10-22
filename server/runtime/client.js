@@ -15,6 +15,9 @@ const recruitment = live
   ? config.recruitment
   : (['prolific', 'sona', 'lab'].includes(query.get('recruitment')) ? query.get('recruitment') : 'prolific');
 
+// Experience sampling: ?session=3 on the link (e.g. from a notification) runs the third session.
+const session = Number.isInteger(Number(query.get('session'))) && Number(query.get('session')) >= 1 ? Number(query.get('session')) : 1;
+
 async function post(path, body, { retries = 3 } = {}) {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -149,7 +152,7 @@ export async function start(experiment) {
   jsPsych.randomization.setSeed(run.seed);
 
   setContext({
-    mode: config.mode, recruitment, version: config.version, jsPsych,
+    mode: config.mode, recruitment, version: config.version, session, jsPsych,
     assign: async (name, conditions) => (await post(`/api/runs/${run.id}/assign`, {
       key: run.key, name, conditions, ...(!live && query.get(name) != null && { chosen: query.get(name) }),
     })).value,
@@ -157,7 +160,7 @@ export async function start(experiment) {
 
   let nodes;
   try {
-    nodes = await experiment.default(jsPsych, { mode: config.mode, recruitment, version: config.version });
+    nodes = await experiment.default(jsPsych, { mode: config.mode, recruitment, version: config.version, session });
     if (!Array.isArray(nodes)) throw new Error('buildTimeline must return an array.');
   } catch (err) {
     console.error(err);

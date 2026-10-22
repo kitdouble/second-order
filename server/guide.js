@@ -56,6 +56,28 @@ export default function buildTimeline(jsPsych, context) {
 - Consent and debrief texts live in the document library (list_documents / get_document), never in experiment
   code. Never write or paste consent or debrief wording into trials.
 
+## Experience sampling (ESM) studies
+
+For a study made of repeated short sessions (e.g. several prompts a day), export \`esm\` next to the default
+export and return the timeline for \`context.session\` (1-based, default 1; participants open session N with
+\`?session=N\` on their link):
+
+\`\`\`js
+export const esm = {
+  notification: { title: "Quick check-in", body: "Takes about 2 minutes" }, // default for every session
+  expires_minutes: 30,                                                       // how long a session stays open
+  sessions: [ // or just a number, e.g. 14
+    { name: "Day 1 morning", time: "Day 1, 09:00" },
+    { name: "Day 1 evening", time: "Day 1, 19:00", notification: { title: "Evening reflection" }, expires_minutes: 60 },
+  ],
+};
+export default function buildTimeline(jsPsych, context) { /* use context.session */ }
+\`\`\`
+
+This only describes the schedule: Second Order does not send notifications. The dashboard (show_dashboard) gets an
+ESM tab listing the notifications and sessions, with a button to preview any session (the dashboard also takes
+\`?session=3\`). simulate runs session 1.
+
 ## Standard lab blocks (import from "second-order")
 
 \`\`\`js

@@ -3,6 +3,7 @@ export const context = {
   mode: "preview",
   recruitment: "prolific",
   version: 0,
+  session: 1, // experience sampling: which session (1-based) this run is
   jsPsych: null,
   // Replaced by the runtime (server-balanced), the simulator (rotates) and the dashboard (random).
   assign: async (_name, conditions) => conditions[Math.floor(Math.random() * conditions.length)],

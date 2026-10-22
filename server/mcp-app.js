@@ -34,6 +34,7 @@ export const panelHtml = `<!doctype html>
 <nav class="tabs">
   <button type="button" data-tab="try" class="active">Try it</button>
   <button type="button" data-tab="study">Study</button>
+  <button type="button" data-tab="esm" id="tab-esm" hidden>ESM<span class="count"></span></button>
   <button type="button" data-tab="sim" id="tab-sim" hidden>Simulation<span class="count"></span></button>
   <button type="button" data-tab="check" id="tab-check" hidden>Launch check</button>
   <button type="button" data-tab="quality" id="tab-quality" hidden>Quality</button>
@@ -52,6 +53,7 @@ export const panelHtml = `<!doctype html>
   </div>
 </section>
 <section class="view" id="view-study"></section>
+<section class="view" id="view-esm"></section>
 <section class="view" id="view-sim"></section>
 <section class="view" id="view-check"></section>
 <section class="view" id="view-quality"></section>

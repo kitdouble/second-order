@@ -61,7 +61,7 @@ window.__soSimulation = (async () => {
       return options.on_data_update?.(data);
     },
   });
-  const context = { mode: 'simulation', recruitment: sim.recruitment, version: sim.version };
+  const context = { mode: 'simulation', recruitment: sim.recruitment, version: sim.version, session: sim.session ?? 1 };
   // Simulated participants rotate through conditions, as balanced assignment would give them.
   setContext({ ...context, jsPsych, assign: async (_name, conditions) => conditions[(sim.participant ?? 0) % conditions.length] });
   const timeline = await experiment.default(jsPsych, context);
