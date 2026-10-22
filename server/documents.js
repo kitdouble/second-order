@@ -28,20 +28,29 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS documents_key ON documents(doc_key, kind, recruitment, created_at);
 `);
 
-// The lab's HREC 2022/796 texts, from the Meta Lab kit, wording unchanged.
-const SEED = [
-  ['consent', 'prolific', 'Participant Information Statement (Prolific)', '2022/796 Prolific v11 (3 March 2026)', 'consent-prolific'],
-  ['consent', 'sona', 'Participant Information Statement (SONA)', '2022/796 SONA v11 (3 March 2026)', 'consent-sona'],
-  ['debrief', 'sona', 'Debrief (SONA)', '2022/796 SONA debrief v2 (3 November 2022)', 'debrief-sona'],
-];
-if (!db.prepare("SELECT 1 FROM documents WHERE doc_key = 'hrec-2022-796'").get()) {
+// A placeholder protocol so a fresh install has something to run: wording to be replaced, not ethics-approved.
+// Real protocols are added with save_document and never live in the code. The oldest document that is not
+// this one is what consent() and debrief() use when no `document` is given (see server/lib/documents.js).
+export const EXAMPLE_DOCUMENT = 'example-protocol';
+const COMPENSATION = {
+  prolific: '<p>You will receive {{payment}} for completing the study, through Prolific. [Explain what happens if the study is not completed.]</p>',
+  sona: '<p>You will receive {{credit}} course credit for completing the study. [Explain what happens if the study is not completed.]</p>',
+  lab: '<p>[Describe any payment or credit, or state that there is none.]</p>',
+};
+const TEMPLATE_DEBRIEF_LABEL = 'TEMPLATE debrief (not ethics approved)';
+if (!db.prepare('SELECT 1 FROM documents WHERE doc_key = ?').get(EXAMPLE_DOCUMENT)) {
+  const read = (file) => readFileSync(resolve(here, `documents/${EXAMPLE_DOCUMENT}.${file}.html`), 'utf8');
   const insert = db.prepare(
     `INSERT INTO documents (doc_key, kind, recruitment, title, form_label, html, change_note, created_by, created_at)
-     VALUES ('hrec-2022-796', ?, ?, ?, ?, ?, 'Imported from the Meta Lab jsPsych kit', NULL, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, 'Placeholder template', NULL, ?)`
   );
-  for (const [kind, recruitment, title, label, file] of SEED) {
-    insert.run(kind, recruitment, title, label, readFileSync(resolve(here, `documents/hrec-2022-796.${file}.html`), 'utf8'), now());
+  for (const recruitment of ['prolific', 'sona', 'lab']) {
+    insert.run(
+      EXAMPLE_DOCUMENT, 'consent', recruitment, `Participant Information Statement (${recruitment}) TEMPLATE`,
+      `TEMPLATE consent ${recruitment} (not ethics approved)`, read('consent').replace('<!-- compensation -->', COMPENSATION[recruitment]), now()
+    );
   }
+  insert.run(EXAMPLE_DOCUMENT, 'debrief', 'any', 'Debrief TEMPLATE', TEMPLATE_DEBRIEF_LABEL, read('debrief'), now());
 }
 
 // The text of each (document, kind, recruitment) as it stood at time `at` (the first text if it is older).
@@ -56,7 +65,8 @@ const latest = (at = Number.MAX_SAFE_INTEGER) => db.prepare(
 /** {key: {consent: {prolific: {...}}, debrief: {...}}} of the texts at time `at` (default now), as fixed into a study version. */
 export function documentSnapshot(at) {
   const snapshot = {};
-  for (const d of latest(at)) {
+  const firstRow = Object.fromEntries(db.prepare('SELECT doc_key, MIN(id) AS first FROM documents GROUP BY doc_key').all().map((r) => [r.doc_key, r.first]));
+  for (const d of latest(at).sort((a, b) => firstRow[a.doc_key] - firstRow[b.doc_key])) {
     ((snapshot[d.doc_key] ??= {})[d.kind] ??= {})[d.recruitment] = { id: d.id, title: d.title, form_label: d.form_label, html: d.html };
   }
   return snapshot;

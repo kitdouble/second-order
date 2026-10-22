@@ -68,16 +68,17 @@ return [deviceCheck({ devices: ["computer"] }), consent({ minutes: 15 }), demogr
   Participants on other devices are told why and the run ends without the completion redirect (not paid).
   Saves device_type, device_allowed, browser, OS and window size. Don't write your own device checks.
 - consent({ minutes, document }): the Participant Information Statement and consent from the document library
-  for the link's recruitment. document defaults to "hrec-2022-796" (Prolific and SONA texts); ask the
-  researcher which protocol covers the study. minutes is the study length; it fills in the length and the
-  Prolific payment (£6/hour) or SONA credit (1/hour, rounded up to 0.25). The built-in protocol has no
+  for the link's recruitment. document defaults to the lab's main protocol (see list_documents); ask the
+  researcher which protocol covers the study. A fresh install only has "example-protocol", placeholder wording that is
+  not ethics-approved: the researcher must add their approved texts with save_document before real participants. minutes is the study length; it fills in the length and the
+  Prolific payment (£6/hour) or SONA credit (1/hour, rounded up to 0.25). A protocol may have no
   in-lab form: if needed, the researcher provides approved wording and you add it with save_document.
 - demographics(): age, gender, English as first language, saved as age, gender, english_first_language.
   Don't reword it; add extra questions as a separate trial after it.
 - fullscreen(): asks to switch to full screen before the task (skipped where impossible, e.g. iPhones).
 - preload(jsPsych): loads every stimulus of the study before the task; stops the run if loading fails.
 - debrief({ document }): the document's debrief for the link's recruitment, put last; skipped where the
-  document has none (HREC 2022/796 has one for SONA only).
+  document has none for that recruitment.
 - Changing consent or debrief wording: only when the researcher explicitly asks. get_document, show them the
   exact new wording or changes, wait for their explicit confirmation, then save_document with a new form_label
   and researcher_confirmed: true. Live experiments using that document pick it up automatically.

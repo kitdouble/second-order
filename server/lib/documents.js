@@ -2,13 +2,20 @@
 import documents from "second-order:documents";
 import logoUrl from "./blocks/assets/usyd-logo.png";
 
+const EXAMPLE_DOCUMENT = "example-protocol";
+
+/** The document used when none is named: the lab's oldest protocol (the placeholder template only if it has none). */
+export function defaultDocument() {
+  return Object.keys(documents).find((key) => key !== EXAMPLE_DOCUMENT) ?? EXAMPLE_DOCUMENT;
+}
+
 /** The text for this kind and recruitment (or the document's "any" text), or undefined. */
-export function findDocument(key, kind, recruitment) {
+export function findDocument(key = defaultDocument(), kind, recruitment) {
   const texts = documents[key]?.[kind];
   return texts?.[recruitment] ?? texts?.any;
 }
 
-export function documentFor(key, kind, recruitment) {
+export function documentFor(key = defaultDocument(), kind, recruitment) {
   if (!documents[key]) {
     throw new Error(`There's no document "${key}". Available: ${Object.keys(documents).join(", ") || "none"} (list_documents).`);
   }

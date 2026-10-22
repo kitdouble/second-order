@@ -3,15 +3,15 @@ import { documentFor, fill } from "../documents.js";
 import { compensation, recruitment } from "../context.js";
 import "./consent.css";
 
-// Participant Information Statement and consent, from the document library (default: HREC 2022/796).
+// Participant Information Statement and consent, from the document library (default: the lab's oldest protocol).
 // The wording is ethics-approved and lives in the library, not here: only the study length and the
 // credit or payment are filled in, from `minutes`.
 
 /**
  * The consent form for this link's participants (Prolific, SONA or lab), filled in with the study length
- * and the credit or payment it works out to. `document` picks another protocol's approved text.
+ * and the credit or payment it works out to. `document` picks another protocol's approved text; without it the lab's default protocol is used.
  */
-export function consent({ minutes, document = "hrec-2022-796" } = {}) {
+export function consent({ minutes, document } = {}) {
   const doc = documentFor(document, "consent", recruitment());
   const needsPay = /\{\{(payment|credit)\}\}/.test(doc.html);
   const pay = compensation(minutes);

@@ -4,13 +4,13 @@ import { recruitment } from "../context.js";
 // Same layout as the Participant Information Statement.
 import "./consent.css";
 
-// Debrief statement from the document library (default: HREC 2022/796, which has one for SONA only).
+// Debrief statement from the document library (default: the lab's oldest protocol).
 
 /**
- * The debrief for this link's participants, if the document has one for their recruitment (for HREC
- * 2022/796: SONA only), and skipped otherwise. Put it last in the timeline, after the task.
+ * The debrief for this link's participants, if the document has one for their recruitment, and
+ * skipped otherwise. Put it last in the timeline, after the task.
  */
-export function debrief({ document = "hrec-2022-796" } = {}) {
+export function debrief({ document } = {}) {
   // Recruitment is known when the timeline is built, so the text can be picked now.
   const doc = findDocument(document, "debrief", recruitment());
   return {

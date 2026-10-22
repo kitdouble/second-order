@@ -11,6 +11,51 @@ shows the connector URL.
 - `src/` — the few React pages, MetaForge visual style
 - `scripts/invite.js` — create invite links from the shell (bootstrap; afterwards use `create_invite`)
 
+## Set up your own lab (using Claude)
+
+You can copy this repo and run your own Second Order. The quickest way is to open it in
+[Claude Code](https://claude.com/claude-code) and ask Claude to do the setup. Paste something like:
+
+> Set up Second Order for my lab. Follow the "Set up your own lab" section of README.md. Run it locally first,
+> create my admin invite, then help me deploy it to a server at `<my domain>`. Don't put my ethics documents in
+> the code: we'll add them through the MCP tools afterwards.
+
+What Claude will be doing (you can also do it by hand):
+
+1. **Run it locally.** Needs Node 22.13 or newer. `npm install`, copy `.env.example` to `.env`, `npm run dev`,
+   then `npm run invite -- --name "Your Name" --email you@example.org --admin`. Open the printed link and create a
+   passkey. This is also how you bootstrap the first admin on a server (`npm run invite:prod`).
+2. **Connect your assistant.** Researchers use Second Order only through Claude or ChatGPT. Add a custom
+   connector pointing at `<APP_ORIGIN>/mcp` (for example `https://yourlab.example.org/mcp`) and sign in with
+   your passkey. Web connectors need a public HTTPS address, so for anything beyond trying it on your own
+   machine, deploy to a server first. Then ask the assistant to call `get_authoring_guide` and build an
+   experiment.
+3. **Add your ethics-approved consent and debrief.** They are not part of this repo. A fresh install only has
+   `example-protocol`, placeholder wording marked TEMPLATE, so you can try everything straight away; `check_launch`
+   fails while a study still shows it. To add your own, tell the assistant, for example: "Add our consent and
+   debrief to Second Order as `hrec-2025-123`" and paste your approved text as HTML. It will use `save_document`
+   and show you the exact wording to confirm first. Notes:
+   - Texts are per recruitment: `prolific`, `sona`, `lab`, or `any` for all. Placeholders: `{{minutes}}`,
+     `{{payment}}` (Prolific forms), `{{credit}}` (SONA forms). A form that uses `{{payment}}` or `{{credit}}`
+     can only be used for that recruitment.
+   - Each edit is a new version with its own `form_label` (recorded in the data as `consent_form` /
+     `debrief_form`), so you can always tell which text each participant saw.
+   - `consent()` and `debrief()` use the lab's oldest document that isn't the example when no `document` is named.
+     Name one with `consent({ minutes, document: "hrec-2025-123" })`.
+4. **Check lab-specific defaults.** Pay rates (6 GBP/hour for Prolific, 1 credit/hour for SONA) are in
+   `server/lib/context.js`. Prolific is optional: set `PROLIFIC_API_TOKEN` (see `.env.example`).
+   `CLAUDE.md` describes the original maintainer's git workflow (push straight to `main`, which deploys); edit it
+   to match how you work.
+5. **Deploy.** Ubuntu 24.04 VPS and a domain pointing at it. Run `DOMAIN=yourlab.example.org` with
+   `deploy/setup-server.sh` (see Production below), then `HOST=<server> npm run deploy`. The GitHub Actions
+   workflow in `.github/workflows/deploy.yml` deploys every push to `main` and falls back to `2ndorder.live`
+   when `DEPLOY_HOST` is not set: set the `DEPLOY_HOST` and `DEPLOY_SSH_KEY` repository secrets, or delete the
+   workflow, and change the default host in `scripts/*.sh`.
+
+Licence: MIT (see `LICENSE`). That covers the code only. `server/lib/blocks/assets/usyd-logo.png` is the University
+of Sydney's logo and is not covered: replace it with your institution's logo, or remove it and the `{{logo}}`
+placeholder from your documents.
+
 ## MCP tools
 
 | Tool | Who | |
@@ -54,9 +99,9 @@ them (hourly, and right after removals).
 
 Experiments can `import { consent, deviceCheck, demographics, fullscreen, preload, debrief, stimulus } from
 "second-order"` (`server/lib/`): the lab's standard blocks, ported from the Meta Lab jsPsych kit. Consent and
-debrief texts come from the document library (`server/documents.js`, seeded with the HREC 2022/796 texts in
-`server/documents/`); every edit is a new version with its own label, and each study version keeps the texts
-it was saved with.
+debrief texts come from the document library (`server/documents.js`, in the database, never in the code; a fresh
+install is seeded with a placeholder `example-protocol` from `server/documents/`); every edit is a new version
+with its own label, and each study version keeps the texts it was saved with.
 
 Access per study: owner (and admins), editor, viewer (`study_members`).
 
@@ -89,7 +134,7 @@ reveals at the end. Bump `version` in `package.json` when the runtime changes; v
 ```bash
 npm install
 npm run dev            # http://localhost:5173 (API on :3000, proxied)
-npm run invite -- --name "Kit Double" --email kitdouble@gmail.com --admin
+npm run invite -- --name "Your Name" --email you@example.org --admin
 ```
 
 Open the printed link and create a passkey. Invites are single-use and expire after 7 days.
