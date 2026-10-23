@@ -14,13 +14,14 @@ export const config = {
   sessionDays: 30,
   inviteDays: 7,
 
-  // OAuth clients may only send people back to these places: Claude, ChatGPT, and local tools
+  // OAuth clients may only send people back to these places: Claude, ChatGPT, Copilot Studio, and local tools
   // on loopback (Claude Code, Zed, MCP Inspector; checked in oauth.js). Add more with OAUTH_EXTRA_REDIRECTS (comma-separated prefixes).
   redirectAllowlist: [
     'https://claude.ai/api/mcp/auth_callback',
     'https://claude.com/api/mcp/auth_callback',
     'https://chatgpt.com/connector_platform_oauth_redirect',
     'https://chatgpt.com/connector/oauth/',
+    'https://global.consent.azure-apim.net/redirect', // Microsoft Copilot Studio
     ...(process.env.OAUTH_EXTRA_REDIRECTS || '').split(',').map((s) => s.trim()).filter(Boolean),
   ],
   accessTokenMinutes: 60,

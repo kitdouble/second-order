@@ -87,7 +87,7 @@ const clientsStore = {
 
   registerClient(info) {
     if (!info.redirect_uris.every(isAllowedRedirect)) {
-      throw new InvalidClientMetadataError('Second Order only accepts Claude and ChatGPT redirect URIs.');
+      throw new InvalidClientMetadataError('Second Order only accepts Claude, ChatGPT and Copilot Studio redirect URIs.');
     }
     saveClient(info);
     return info;

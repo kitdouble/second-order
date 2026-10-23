@@ -6,7 +6,7 @@ shows the connector URL.
 
 - `server/mcp.js` — the MCP endpoint (`/mcp`) and its tools. This is the product.
 - `server/oauth.js` — OAuth 2.1 server for connectors: DCR, client ID metadata documents, PKCE,
-  resource-bound tokens, refresh rotation, redirect allowlist (Claude, ChatGPT, localhost).
+  resource-bound tokens, refresh rotation, redirect allowlist (Claude, ChatGPT, Copilot Studio, localhost).
 - `server/auth.js` — invites and passkeys (SimpleWebAuthn); `server/db.js` — SQLite (`node:sqlite`)
 - `src/` — the few React pages, MetaForge visual style
 - `scripts/invite.js` — create invite links from the shell (bootstrap; afterwards use `create_invite`)
