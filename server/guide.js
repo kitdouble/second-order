@@ -131,9 +131,12 @@ return [consent({ minutes: 10 }), demographics(), ...baseline, esmCode({ study: 
   schedule and the same owner (or one the intake study's owner can edit). It shows the code with install and
   enter instructions (instructions replaces them; HTML with {code} where the code goes) and saves esm_code.
   Previews issue test codes; simulate and the dashboard show SO-TEST-CODE.
-- Survey hosted in Qualtrics: skip step 1 and call set_esm_schedule with survey_url (the survey's anonymous link).
+- Survey hosted in Qualtrics: skip step 1. Ask the researcher for the survey's anonymous link (they can create the
+  survey first and add the Survey Flow steps afterwards), then call set_esm_schedule with it as survey_url.
   The app opens that link for every prompt with ?participant, sessionNumber, notificationTime and timezone, which
-  the survey must save as embedded data. The response lists the Survey Flow steps to give the researcher: the
+  the survey must save as embedded data. The Web Service URL contains a secret that only exists once the link is
+  saved, so the steps come from the response, not from memory. Walk the researcher through them one at a time and
+  ask them to confirm they are in place before issuing real codes. The response lists the Survey Flow steps: the
   embedded data fields, a Web Service step (GET, with a secret URL) before the last block that tells Second Order
   the session is finished, and a last-block snippet that closes the survey in the app. Responses stay in Qualtrics
   (get_data is empty for the study); esm_status counts sessions from the Web Service calls. "Prevent multiple

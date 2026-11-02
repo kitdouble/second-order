@@ -454,7 +454,8 @@ export function buildServer() {
       'To end the study, close its "ESM app sessions" link with close_participant_link (new sessions and enrolments are refused). ' +
       'If the momentary survey is built in Qualtrics, give survey_url instead of writing an experiment: the app opens that survey, the response ' +
       'data stays in Qualtrics, and the result lists the Survey Flow steps (embedded data, a Web Service step that reports each finished session, ' +
-      'and a last-page snippet that closes the survey in the app). Close such a study with closed: true.',
+      'and a last-page snippet that closes the survey in the app). Ask the researcher for the survey link first, then relay those steps to them and ' +
+      'have them confirm they are done (try a test code) before real codes go out. Close such a study with closed: true.',
     inputSchema: {
       study_id: z.string(),
       survey_url: z.string().max(500).nullable().optional().describe('Anonymous link of a survey hosted in Qualtrics (https://….qualtrics.com/jfe/form/SV_…); the app opens it for each prompt. null: go back to the study\'s own experiment'),
