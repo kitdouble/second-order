@@ -324,6 +324,17 @@ db.exec(`
     PRIMARY KEY (participant_id, dedupe)
   );
   CREATE INDEX IF NOT EXISTS esm_sessions_study ON esm_sessions(study_id);
+
+  -- What reached /esm/done with a study's key, and how it ended: the way to see why a survey's Web Service step isn't counting.
+  CREATE TABLE IF NOT EXISTS esm_done_calls (
+    study_id    TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
+    at          INTEGER NOT NULL,
+    method      TEXT NOT NULL,
+    outcome     TEXT NOT NULL,
+    received    TEXT NOT NULL,              -- JSON: which parameters came with values (never the key)
+    user_agent  TEXT
+  );
+  CREATE INDEX IF NOT EXISTS esm_done_calls_study ON esm_done_calls(study_id, at);
 `);
 
 export const now = () => Date.now();

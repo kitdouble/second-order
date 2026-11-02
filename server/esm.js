@@ -328,6 +328,10 @@ export function esmStatus(user, studyId, { include_test = false } = {}) {
       withdrawn: codes.filter((c) => c.withdrawn_at).length,
     },
     participants,
+    ...(external && {
+      recent_completion_calls: db.prepare('SELECT at, method, outcome, received, user_agent FROM esm_done_calls WHERE study_id = ? ORDER BY at DESC LIMIT 8').all(study.id)
+        .map((c) => ({ at: iso(c.at), method: c.method, outcome: c.outcome, received: JSON.parse(c.received), user_agent: c.user_agent })),
+    }),
     note: 'compliance = completed sessions / prompts sent so far (approximate: counted in whole days since enrolment). ' +
       (external
         ? 'Responses are in Qualtrics, keyed by the participant, sessionNumber, notificationTime and timezone embedded data; a completed session is one the survey reported through its Web Service step.'
@@ -433,17 +437,24 @@ function done(req, res) {
   const key = str(q.key, 100);
   const esm = key && db.prepare('SELECT * FROM esm_studies WHERE callback_key = ?').get(key);
   if (!esm) return fail(res, 403, 'Invalid key');
-  if (isClosed(esm)) return fail(res, 410, 'This study is closed.');
+  const received = JSON.stringify(Object.fromEntries(['participant', 'sessionNumber', 'notificationTime', 'responseId'].map((k) => [k, str(q[k], 200) || null])));
+  const log = (outcome) => {
+    db.prepare('INSERT INTO esm_done_calls (study_id, at, method, outcome, received, user_agent) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(esm.study_id, now(), req.method, outcome, received, String(req.get('user-agent') ?? '').slice(0, 120));
+    db.prepare('DELETE FROM esm_done_calls WHERE study_id = ? AND at < (SELECT MIN(at) FROM (SELECT at FROM esm_done_calls WHERE study_id = ? ORDER BY at DESC LIMIT 30))').run(esm.study_id, esm.study_id);
+  };
+  if (isClosed(esm)) { log('refused: study closed'); return fail(res, 410, 'This study is closed.'); }
   const participant = str(q.participant, 100);
   const code = participant && db.prepare('SELECT * FROM esm_codes WHERE participant_id = ? AND study_id = ? AND withdrawn_at IS NULL').get(participant, esm.study_id);
-  if (!code) return fail(res, 400, 'Unknown participant: is the participant embedded data field set in the survey?');
+  if (!code) { log(participant ? 'refused: participant not enrolled in this study' : 'refused: participant is empty (embedded data not set)'); return fail(res, 400, 'Unknown participant: is the participant embedded data field set in the survey?'); }
   const sessionNumber = Number.parseInt(str(q.sessionNumber, 10), 10);
   const responseId = str(q.responseId, 100) || null;
   const dedupe = responseId ?? `n${Number.isFinite(sessionNumber) ? sessionNumber : str(q.notificationTime, 40)}`;
-  db.prepare(
+  const { changes } = db.prepare(
     `INSERT OR IGNORE INTO esm_sessions (study_id, participant_id, dedupe, session_number, notification_time, response_id, is_test, completed_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(esm.study_id, participant, dedupe, Number.isFinite(sessionNumber) ? sessionNumber : null, str(q.notificationTime, 40) || null, responseId, code.is_test, now());
+  log(changes ? 'counted' : 'repeat of a session already counted');
   res.json({ success: true });
 }
 esmApp.get('/esm/done', done);
