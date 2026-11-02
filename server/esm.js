@@ -170,7 +170,8 @@ function qualtricsSetup(key) {
       'Survey Flow, after the questions and before the last block: a Web Service element, method GET, URL below, with the four query parameters listed. This is what counts the session.',
       'Last block (after the Web Service): a text question with the JavaScript below, so the app closes the survey and shows the updated count. Put it after the Web Service so the count is already right.',
       'Survey Options: leave "Prevent multiple submissions" off, or a second prompt on the same phone is refused.',
-      'Publish the survey and give the link you set as survey_url. Try it with create_esm_codes test: true.',
+      'Click Publish in Qualtrics. Flow, JavaScript and option changes only go live when published, and after any later edit it must be published again: an unpublished flow shows the default end message and never reports sessions.',
+      'Try it with create_esm_codes test: true (start_with_survey: true makes the app offer a survey at once). esm_status lists recent completion calls and how each ended; none at all usually means the survey was not re-published.',
     ],
     web_service_url: completionUrl(key),
     web_service_query_parameters: {

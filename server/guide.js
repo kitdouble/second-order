@@ -140,7 +140,9 @@ return [consent({ minutes: 10 }), demographics(), ...baseline, esmCode({ study: 
   embedded data fields, a Web Service step (GET, with a secret URL) before the last block that tells Second Order
   the session is finished, and a last-block snippet that closes the survey in the app. Responses stay in Qualtrics
   (get_data is empty for the study); esm_status counts sessions from the Web Service calls. "Prevent multiple
-  submissions" must be off. Test with create_esm_codes test: true; end the study with set_esm_schedule closed: true.
+  submissions" must be off, and the survey must be re-published after every change (the usual cause of sessions not
+  counting; esm_status shows recent completion calls to tell). start_with_survey: true gives a test code an
+  immediate survey; otherwise the app only offers one inside a prompt's window. Test with create_esm_codes test: true; end the study with set_esm_schedule closed: true.
 - Track with esm_status (enrolled, sessions, compliance) and study_status. Close the "ESM app sessions" link
   (close_participant_link) to end the study.
 
