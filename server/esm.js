@@ -266,7 +266,7 @@ export function intakeSetup(user, studyId) {
     app_title: esm.app_title,
     steps: [
       'In the intake survey\'s Survey Flow, add an Embedded Data element (any name will do) with the field esmCode and no value, before the Web Service element.',
-      'After the consent and baseline questions, add a Web Service element: method GET, the URL below, with the query parameters listed. Add test=1 first, press Test next to the URL (Qualtrics calls us and shows the response), then under Set Embedded Data choose Add Embedded Data… and set the response key code to the field esmCode. Remove test=1 when done testing.',
+      'After the consent and baseline questions, add a Web Service element: method GET, the URL below, with the query parameters listed. Add test=1 first, press Test next to the URL (Qualtrics calls us and shows the response), then under Set Embedded Data choose Add Embedded Data…: in that row the LEFT box is the field to fill (esmCode) and the RIGHT box is the key in our reply (code), so it reads esmCode = code. Remove test=1 when done testing, and publish.',
       'Add a block after it showing the code, e.g. "Your enrolment code is ${e://Field/esmCode}", with the install and enter instructions (below). Anyone who reloads or resumes the same response sees the same code.',
       'Publish the survey (and again after any later change). Test it in the live survey rather than the preview.',
     ],
