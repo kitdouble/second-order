@@ -181,7 +181,11 @@ function qualtricsSetup(key) {
     },
     last_page_javascript:
       "Qualtrics.SurveyEngine.addOnReady(function () {\n" +
-      "  try { window.webkit.messageHandlers.surveyComplete.postMessage('completed'); } catch (e) {}\n" +
+      "  try {\n" +
+      "    var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.surveyComplete;\n" +
+      "    if (h) h.postMessage('completed'); // iPhone, and Android once its shim is in\n" +
+      "    else if (window.AndroidSurvey) window.AndroidSurvey.surveyComplete(); // Android\n" +
+      "  } catch (e) {}\n" +
       "});",
     note: 'Data stays in Qualtrics: get_data has no rows for this study. esm_status shows enrolment, completed sessions and compliance from the Web Service calls.',
   };
