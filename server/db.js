@@ -288,6 +288,44 @@ db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS esm_codes_source ON esm_codes(source_run_id, study_id) WHERE source_run_id IS NOT NULL;
 `);
 
+// ESM studies whose momentary survey is hosted elsewhere (Qualtrics): no live link, the app opens survey_url,
+// and the survey reports each finished session to Second Order with callback_key (esm_sessions).
+const esmLink = db.prepare('PRAGMA table_info(esm_studies)').all().find((c) => c.name === 'link_token');
+if (esmLink?.notnull) {
+  db.exec(`
+    BEGIN;
+    CREATE TABLE esm_studies_new (
+      study_id     TEXT PRIMARY KEY REFERENCES studies(id) ON DELETE CASCADE,
+      app_title    TEXT NOT NULL,
+      schedule     TEXT NOT NULL,
+      link_token   TEXT REFERENCES links(token),
+      updated_by   TEXT NOT NULL REFERENCES users(id),
+      updated_at   INTEGER NOT NULL
+    );
+    INSERT INTO esm_studies_new SELECT * FROM esm_studies;
+    DROP TABLE esm_studies;
+    ALTER TABLE esm_studies_new RENAME TO esm_studies;
+    COMMIT;
+  `);
+}
+addColumn('esm_studies', 'survey_url', 'TEXT');     // the hosted survey the app opens, instead of the live experiment
+addColumn('esm_studies', 'callback_key', 'TEXT');   // secret in the survey's completion call
+addColumn('esm_studies', 'closed_at', 'INTEGER');   // hosted surveys have no link to close
+db.exec(`
+  CREATE TABLE IF NOT EXISTS esm_sessions (
+    study_id          TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
+    participant_id    TEXT NOT NULL,
+    dedupe            TEXT NOT NULL,        -- the survey's response id, else its session number
+    session_number    INTEGER,
+    notification_time TEXT,
+    response_id       TEXT,
+    is_test           INTEGER NOT NULL,
+    completed_at      INTEGER NOT NULL,
+    PRIMARY KEY (participant_id, dedupe)
+  );
+  CREATE INDEX IF NOT EXISTS esm_sessions_study ON esm_sessions(study_id);
+`);
+
 export const now = () => Date.now();
 export const DAY = 24 * 60 * 60 * 1000;
 export const newId = () => randomUUID();

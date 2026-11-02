@@ -451,9 +451,14 @@ export function buildServer() {
       'change; the rest keep their current values (MetaForge defaults at first: random, 4 a day, 7 days, 09:00-20:00, 60 min apart, ' +
       'open 30 min). Each participant keeps the schedule they enrolled with, so changes reach only people who enrol afterwards. ' +
       'Then give out codes: create_esm_codes, or the esmCode block in an intake study (get_authoring_guide). Track with esm_status. ' +
-      'To end the study, close its "ESM app sessions" link with close_participant_link (new sessions and enrolments are refused).',
+      'To end the study, close its "ESM app sessions" link with close_participant_link (new sessions and enrolments are refused). ' +
+      'If the momentary survey is built in Qualtrics, give survey_url instead of writing an experiment: the app opens that survey, the response ' +
+      'data stays in Qualtrics, and the result lists the Survey Flow steps (embedded data, a Web Service step that reports each finished session, ' +
+      'and a last-page snippet that closes the survey in the app). Close such a study with closed: true.',
     inputSchema: {
       study_id: z.string(),
+      survey_url: z.string().max(500).nullable().optional().describe('Anonymous link of a survey hosted in Qualtrics (https://….qualtrics.com/jfe/form/SV_…); the app opens it for each prompt. null: go back to the study\'s own experiment'),
+      closed: z.boolean().optional().describe('true: stop new enrolments and session reports (the way to end a Qualtrics-hosted study); false: reopen'),
       app_title: z.string().min(1).max(80).optional().describe('Study name participants see in the app (required the first time)'),
       schedule_type: z.enum(['random', 'fixed']).optional().describe('random: prompts at random times in the window, at least min_gap_minutes apart. fixed: evenly spaced through the window'),
       prompts_per_day: z.number().int().min(1).max(20).optional(),

@@ -3,6 +3,8 @@
 // speak the same four endpoints (emaValidateCode, emaEnroll, emaGetConfig, emaRecordSession) on the
 // run origin. Each app session opens the study's ESM link with ?participant=…&sessionNumber=…&
 // notificationTime=…&timezone=…, runs the live experiment like any other run, and counts once it finishes.
+// A study can instead point the app at a survey hosted in Qualtrics (survey_url): the survey reads those
+// parameters as embedded data and tells /esm/done when a session is finished, and the sessions are counted there.
 import express from 'express';
 import { randomBytes, randomInt } from 'node:crypto';
 import { db, newToken, now, DAY } from './db.js';
@@ -83,11 +85,26 @@ const previewToken = (studyId) =>
   db.prepare("SELECT token FROM links WHERE study_id = ? AND kind = 'preview' ORDER BY created_at DESC LIMIT 1").get(studyId)?.token;
 
 /** Create or change a study's ESM schedule. The first call also makes the live link app sessions run on. */
-export function setSchedule(user, studyId, { app_title, ...fields }) {
+export function setSchedule(user, studyId, { app_title, survey_url, closed, ...fields }) {
   const study = findStudy(user, studyId, 'edit');
   const revision = currentRevision(study.id);
-  if (!revision) throw new StudyError('Write the momentary survey first (update_experiment); the ESM schedule runs the study\'s live experiment.');
   const existing = esmOf(study.id);
+
+  // Where sessions run: a hosted survey (survey_url) or the live experiment. Not given: stays as it was.
+  let surveyUrl = existing?.survey_url ?? null;
+  const surveyWarnings = [];
+  if (survey_url !== undefined) {
+    if (survey_url === null || survey_url === '') surveyUrl = null;
+    else {
+      let url;
+      try { url = new URL(survey_url); } catch { throw new StudyError('survey_url must be the survey\'s full https link.'); }
+      if (url.protocol !== 'https:') throw new StudyError('survey_url must be an https link (the apps refuse plain http).');
+      if (!url.hostname.endsWith('qualtrics.com')) surveyWarnings.push(`${url.hostname} isn't a qualtrics.com address; fine for a custom Qualtrics domain, but check the link opens the survey.`);
+      url.search = ''; url.hash = '';
+      surveyUrl = url.toString();
+    }
+  }
+  if (!surveyUrl && !revision) throw new StudyError('Write the momentary survey first (update_experiment), or give survey_url to use a survey hosted in Qualtrics; the ESM schedule needs one or the other.');
 
   const schedule = { ...DEFAULT_SCHEDULE, ...existing?.schedule };
   for (const [name, value] of Object.entries(fields)) {
@@ -97,24 +114,31 @@ export function setSchedule(user, studyId, { app_title, ...fields }) {
   }
   const { problems, warnings } = checkSchedule(schedule);
   if (problems.length) throw new StudyError(`Schedule not saved:\n- ${problems.join('\n- ')}`);
+  let callbackKey = null;
   const title = app_title?.trim() || existing?.app_title;
   if (!title) throw new StudyError('Give app_title: the study name participants see in the app (the study title is researcher-facing).');
 
   db.exec('BEGIN IMMEDIATE');
   try {
-    let linkToken = existing?.link_token;
-    if (!linkToken) {
+    let linkToken = existing?.link_token ?? null;
+    if (!linkToken && !surveyUrl) {
       linkToken = newToken();
       db.prepare(
         `INSERT INTO links (token, study_id, version_id, kind, recruitment, completion_url, label, created_by, created_at)
          VALUES (?, ?, ?, 'live', 'none', NULL, 'ESM app sessions', ?, ?)`
       ).run(linkToken, study.id, revision.id, user.id, now());
     }
+    callbackKey = existing?.callback_key ?? (surveyUrl ? newToken() : null);
     db.prepare(
-      `INSERT INTO esm_studies (study_id, app_title, schedule, link_token, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT (study_id) DO UPDATE SET app_title = excluded.app_title, schedule = excluded.schedule,
-         updated_by = excluded.updated_by, updated_at = excluded.updated_at`
-    ).run(study.id, title, JSON.stringify(schedule), linkToken, user.id, now());
+      `INSERT INTO esm_studies (study_id, app_title, schedule, link_token, survey_url, callback_key, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (study_id) DO UPDATE SET app_title = excluded.app_title, schedule = excluded.schedule, link_token = excluded.link_token,
+         survey_url = excluded.survey_url, callback_key = excluded.callback_key, updated_by = excluded.updated_by, updated_at = excluded.updated_at`
+    ).run(study.id, title, JSON.stringify(schedule), linkToken, surveyUrl, callbackKey, user.id, now());
+    if (closed !== undefined) {
+      const at = closed ? now() : null;
+      db.prepare('UPDATE esm_studies SET closed_at = ? WHERE study_id = ?').run(at, study.id);
+      if (linkToken) db.prepare('UPDATE links SET closed_at = ? WHERE token = ?').run(at, linkToken);
+    }
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
@@ -126,8 +150,9 @@ export function setSchedule(user, studyId, { app_title, ...fields }) {
     study: study.id,
     app_title: title,
     schedule: describeSchedule(schedule),
-    ...(warnings.length && { warnings }),
-    note: (existing ? 'Schedule updated. ' : 'ESM is set up: the live experiment is the momentary survey each prompt opens. ') +
+    ...(warnings.length + surveyWarnings.length && { warnings: [...warnings, ...surveyWarnings] }),
+    ...(surveyUrl && { survey_url: surveyUrl, qualtrics_setup: qualtricsSetup(callbackKey) }),
+    note: (existing ? 'Schedule updated. ' : surveyUrl ? 'ESM is set up: each prompt opens the hosted survey. ' : 'ESM is set up: the live experiment is the momentary survey each prompt opens. ') +
       'Each participant keeps the schedule they enrolled with' + (enrolled ? ` (${enrolled} already enrolled keep their old one)` : '') + '. ' +
       'Give participants codes with create_esm_codes, or from an intake study with the esmCode block (get_authoring_guide).',
   };
@@ -135,6 +160,32 @@ export function setSchedule(user, studyId, { app_title, ...fields }) {
 
 const FIELD_NAMES = Object.fromEntries(Object.entries(FIELDS).map(([mcp, app]) => [app, mcp]));
 const describeSchedule = (schedule) => Object.fromEntries(Object.entries(schedule).map(([k, v]) => [FIELD_NAMES[k] ?? k, v]));
+
+export const completionUrl = (key) => `${config.runOrigin}/esm/done?key=${key}`;
+
+function qualtricsSetup(key) {
+  return {
+    steps: [
+      'Survey Flow, at the top: an Embedded Data element with the fields participant, sessionNumber, notificationTime and timezone (no values). The app adds them to the survey link and Qualtrics saves them with each response.',
+      'Survey Flow, after the questions and before the last block: a Web Service element, method GET, URL below, with the four query parameters listed. This is what counts the session.',
+      'Last block (after the Web Service): a text question with the JavaScript below, so the app closes the survey and shows the updated count. Put it after the Web Service so the count is already right.',
+      'Survey Options: leave "Prevent multiple submissions" off, or a second prompt on the same phone is refused.',
+      'Publish the survey and give the link you set as survey_url. Try it with create_esm_codes test: true.',
+    ],
+    web_service_url: completionUrl(key),
+    web_service_query_parameters: {
+      participant: '${e://Field/participant}',
+      sessionNumber: '${e://Field/sessionNumber}',
+      notificationTime: '${e://Field/notificationTime}',
+      responseId: '${e://Field/ResponseID}',
+    },
+    last_page_javascript:
+      "Qualtrics.SurveyEngine.addOnReady(function () {\n" +
+      "  try { window.webkit.messageHandlers.surveyComplete.postMessage('completed'); } catch (e) {}\n" +
+      "});",
+    note: 'Data stays in Qualtrics: get_data has no rows for this study. esm_status shows enrolment, completed sessions and compliance from the Web Service calls.',
+  };
+}
 
 /* ---------- Codes ---------- */
 
@@ -212,9 +263,13 @@ export function appRun(link, given) {
   return { params, participantId: usable ? enrolment.participant_id : null };
 }
 
-const sessionsCompleted = (studyId, participantId) => db.prepare(
-  'SELECT COUNT(*) AS n FROM runs WHERE study_id = ? AND participant_id = ? AND finished_at IS NOT NULL AND stopped IS NULL'
+const sessionsCompleted = (studyId, participantId) => (hosted(studyId)
+  ? db.prepare('SELECT COUNT(*) AS n FROM esm_sessions WHERE study_id = ? AND participant_id = ?')
+  : db.prepare('SELECT COUNT(*) AS n FROM runs WHERE study_id = ? AND participant_id = ? AND finished_at IS NOT NULL AND stopped IS NULL')
 ).get(studyId, participantId).n;
+
+const hosted = (studyId) => !!db.prepare('SELECT survey_url FROM esm_studies WHERE study_id = ?').get(studyId)?.survey_url;
+const isClosed = (esm) => !!esm.closed_at || !!(esm.link_token && db.prepare('SELECT closed_at FROM links WHERE token = ?').get(esm.link_token)?.closed_at);
 
 /* ---------- Status ---------- */
 
@@ -222,11 +277,12 @@ export function esmStatus(user, studyId, { include_test = false } = {}) {
   const study = findStudy(user, studyId);
   const esm = esmOf(study.id);
   if (!esm) throw new StudyError('This study has no ESM schedule yet: set_esm_schedule first.');
-  const link = db.prepare('SELECT closed_at FROM links WHERE token = ?').get(esm.link_token);
+  const closedAt = esm.closed_at ?? (esm.link_token && db.prepare('SELECT closed_at FROM links WHERE token = ?').get(esm.link_token)?.closed_at);
   const codes = db.prepare(`SELECT * FROM esm_codes WHERE study_id = ?${include_test ? '' : ' AND is_test = 0'} ORDER BY created_at`).all(study.id);
-  const lastSession = db.prepare(
-    'SELECT MAX(finished_at) AS at FROM runs WHERE study_id = ? AND participant_id = ? AND finished_at IS NOT NULL AND stopped IS NULL'
-  );
+  const external = !!esm.survey_url;
+  const lastSession = external
+    ? db.prepare('SELECT MAX(completed_at) AS at FROM esm_sessions WHERE study_id = ? AND participant_id = ?')
+    : db.prepare('SELECT MAX(finished_at) AS at FROM runs WHERE study_id = ? AND participant_id = ? AND finished_at IS NOT NULL AND stopped IS NULL');
   const started = db.prepare('SELECT COUNT(*) AS n FROM runs WHERE study_id = ? AND participant_id = ?');
 
   const participants = codes.filter((c) => c.enrolled_at).map((c) => {
@@ -247,7 +303,7 @@ export function esmStatus(user, studyId, { include_test = false } = {}) {
       enrolled: iso(c.enrolled_at),
       ends: iso(c.enrolled_at + schedule.studyDuration * DAY),
       ...(c.withdrawn_at && { withdrawn: iso(c.withdrawn_at) }),
-      sessions_started: started.get(study.id, c.participant_id).n,
+      ...(!external && { sessions_started: started.get(study.id, c.participant_id).n }),
       sessions_completed: completed,
       ...(promptedSoFar != null && { prompts_so_far_approx: promptedSoFar, compliance: promptedSoFar ? Math.round((100 * completed) / promptedSoFar) / 100 : null }),
       ...(schedule.goalSessions && { goal_sessions: schedule.goalSessions }),
@@ -258,7 +314,8 @@ export function esmStatus(user, studyId, { include_test = false } = {}) {
   return {
     study: study.id,
     app_title: esm.app_title,
-    sessions_link: link?.closed_at ? `closed ${iso(link.closed_at)}: app sessions are refused` : 'open',
+    ...(external && { survey_url: esm.survey_url, completion_url: completionUrl(esm.callback_key) }),
+    sessions_link: closedAt ? `closed ${iso(closedAt)}: ${external ? 'enrolment and session reports are refused' : 'app sessions are refused'}` : 'open',
     schedule: describeSchedule(esm.schedule),
     codes: {
       issued: codes.length,
@@ -268,7 +325,9 @@ export function esmStatus(user, studyId, { include_test = false } = {}) {
     },
     participants,
     note: 'compliance = completed sessions / prompts sent so far (approximate: counted in whole days since enrolment). ' +
-      'Session rows in get_data have param_participant, param_sessionNumber, param_notificationTime and param_timezone.',
+      (external
+        ? 'Responses are in Qualtrics, keyed by the participant, sessionNumber, notificationTime and timezone embedded data; a completed session is one the survey reported through its Web Service step.'
+        : 'Session rows in get_data have param_participant, param_sessionNumber, param_notificationTime and param_timezone.'),
   };
 }
 
@@ -277,6 +336,7 @@ export function forgetParticipant(studyId, participantId) {
   db.prepare('UPDATE esm_codes SET withdrawn_at = COALESCE(withdrawn_at, ?), device = NULL, source_participant_id = NULL WHERE study_id = ? AND participant_id = ?')
     .run(now(), studyId, participantId);
   db.prepare('UPDATE esm_codes SET source_participant_id = NULL WHERE source_study_id = ? AND source_participant_id = ?').run(studyId, participantId);
+  db.prepare('DELETE FROM esm_sessions WHERE study_id = ? AND participant_id = ?').run(studyId, participantId); // responses held in Qualtrics are the researcher's to delete
 }
 
 /* ---------- The apps' endpoints (run origin) ---------- */
@@ -301,12 +361,11 @@ function usableCode(req, res) {
   }
   if (row.enrolled_at) return fail(res, 400, 'Code already used');
   const esm = esmOf(row.study_id);
-  const link = esm && db.prepare('SELECT closed_at FROM links WHERE token = ?').get(esm.link_token);
-  if (!esm || link.closed_at) return fail(res, 410, 'This study is no longer enrolling.');
+  if (!esm || isClosed(esm)) return fail(res, 410, 'This study is no longer enrolling.');
   return { row, esm };
 }
 
-const surveyUrl = (esm, isTest) => `${config.runOrigin}/s/${isTest ? previewToken(esm.study_id) : esm.link_token}`;
+const surveyUrl = (esm, isTest) => esm.survey_url ?? `${config.runOrigin}/s/${isTest ? previewToken(esm.study_id) : esm.link_token}`;
 
 esmApp.post('/emaValidateCode', (req, res) => {
   const found = usableCode(req, res);
@@ -362,6 +421,29 @@ esmApp.post('/emaGetConfig', (req, res) => {
     sessionsCompleted: sessionsCompleted(row.study_id, row.participant_id),
   });
 });
+
+// A hosted survey's Web Service step: one finished session. Repeats of the same response are ignored.
+function done(req, res) {
+  const q = { ...req.query, ...(req.body && typeof req.body === 'object' ? req.body : {}) };
+  const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  const key = str(q.key, 100);
+  const esm = key && db.prepare('SELECT * FROM esm_studies WHERE callback_key = ?').get(key);
+  if (!esm) return fail(res, 403, 'Invalid key');
+  if (isClosed(esm)) return fail(res, 410, 'This study is closed.');
+  const participant = str(q.participant, 100);
+  const code = participant && db.prepare('SELECT * FROM esm_codes WHERE participant_id = ? AND study_id = ? AND withdrawn_at IS NULL').get(participant, esm.study_id);
+  if (!code) return fail(res, 400, 'Unknown participant: is the participant embedded data field set in the survey?');
+  const sessionNumber = Number.parseInt(str(q.sessionNumber, 10), 10);
+  const responseId = str(q.responseId, 100) || null;
+  const dedupe = responseId ?? `n${Number.isFinite(sessionNumber) ? sessionNumber : str(q.notificationTime, 40)}`;
+  db.prepare(
+    `INSERT OR IGNORE INTO esm_sessions (study_id, participant_id, dedupe, session_number, notification_time, response_id, is_test, completed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(esm.study_id, participant, dedupe, Number.isFinite(sessionNumber) ? sessionNumber : null, str(q.notificationTime, 40) || null, responseId, code.is_test, now());
+  res.json({ success: true });
+}
+esmApp.get('/esm/done', done);
+esmApp.post('/esm/done', express.json({ limit: '4kb' }), express.urlencoded({ extended: false, limit: '4kb' }), done);
 
 // Sessions are counted from the runs themselves when they finish; this only acknowledges the app.
 esmApp.post('/emaRecordSession', (req, res) => {
