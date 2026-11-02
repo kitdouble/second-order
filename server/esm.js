@@ -290,16 +290,23 @@ function issueForIntake(req, res) {
   const key = str(q.key, 100);
   const esm = key && db.prepare('SELECT * FROM esm_studies WHERE intake_key = ?').get(key);
   if (!esm) return fail(res, 403, 'Invalid key');
-  if (isClosed(esm)) return fail(res, 410, 'This study is closed.');
   const id = str(q.id, 100);
-  if (!id) return fail(res, 400, 'id is empty: send the response id (${e://Field/ResponseID}).');
   const ref = str(q.ref, 100);
+  const isTest = ['1', 'true'].includes(str(q.test, 5));
+  const log = (outcome) => {
+    db.prepare('INSERT INTO esm_done_calls (study_id, at, method, outcome, received, user_agent) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(esm.study_id, now(), req.method, `code request: ${outcome}`, JSON.stringify({ id: id || null, ref: ref || null, test: isTest }), String(req.get('user-agent') ?? '').slice(0, 120));
+    db.prepare('DELETE FROM esm_done_calls WHERE study_id = ? AND at < (SELECT MIN(at) FROM (SELECT at FROM esm_done_calls WHERE study_id = ? ORDER BY at DESC LIMIT 30))').run(esm.study_id, esm.study_id);
+  };
+  if (isClosed(esm)) { log('refused: study closed'); return fail(res, 410, 'This study is closed.'); }
+  if (!id) { log('refused: id is empty'); return fail(res, 400, 'id is empty: send the response id (${e://Field/ResponseID}).'); }
   const existing = db.prepare('SELECT * FROM esm_codes WHERE external_ref = ? AND study_id = ?').get(id, esm.study_id);
-  if (existing?.withdrawn_at) return fail(res, 410, 'This participant\'s data was deleted.');
-  if (!existing && issuedByIntake(esm.study_id) >= MAX_INTAKE_CODES) return fail(res, 429, 'Too many codes issued for this study.');
+  if (existing?.withdrawn_at) { log('refused: participant data deleted'); return fail(res, 410, 'This participant\'s data was deleted.'); }
+  if (!existing && issuedByIntake(esm.study_id) >= MAX_INTAKE_CODES) { log('refused: too many codes'); return fail(res, 429, 'Too many codes issued for this study.'); }
   const code = existing?.code ?? insertCode({
-    studyId: esm.study_id, isTest: ['1', 'true'].includes(str(q.test, 5)), label: ref ? `Qualtrics intake: ${ref}` : 'Qualtrics intake', externalRef: id,
+    studyId: esm.study_id, isTest, label: ref ? `Qualtrics intake: ${ref}` : 'Qualtrics intake', externalRef: id,
   });
+  log(existing ? 'same code returned again' : `issued ${showCode(code)}`);
   res.json({ code: showCode(code) });
 }
 
@@ -344,6 +351,9 @@ export function esmStatus(user, studyId, { include_test = false } = {}) {
     : db.prepare('SELECT MAX(finished_at) AS at FROM runs WHERE study_id = ? AND participant_id = ? AND finished_at IS NOT NULL AND stopped IS NULL');
   const started = db.prepare('SELECT COUNT(*) AS n FROM runs WHERE study_id = ? AND participant_id = ?');
 
+  const calls = db.prepare('SELECT at, method, outcome, received, user_agent FROM esm_done_calls WHERE study_id = ? ORDER BY at DESC LIMIT 8').all(study.id)
+    .map((c) => ({ at: iso(c.at), method: c.method, outcome: c.outcome, received: JSON.parse(c.received), user_agent: c.user_agent }));
+
   const participants = codes.filter((c) => c.enrolled_at).map((c) => {
     const schedule = JSON.parse(c.schedule);
     const completed = sessionsCompleted(study.id, c.participant_id);
@@ -384,10 +394,7 @@ export function esmStatus(user, studyId, { include_test = false } = {}) {
       withdrawn: codes.filter((c) => c.withdrawn_at).length,
     },
     participants,
-    ...(external && {
-      recent_completion_calls: db.prepare('SELECT at, method, outcome, received, user_agent FROM esm_done_calls WHERE study_id = ? ORDER BY at DESC LIMIT 8').all(study.id)
-        .map((c) => ({ at: iso(c.at), method: c.method, outcome: c.outcome, received: JSON.parse(c.received), user_agent: c.user_agent })),
-    }),
+    ...(calls.length || external ? { recent_qualtrics_calls: calls } : {}),
     note: 'compliance = completed sessions / prompts sent so far (approximate: counted in whole days since enrolment). ' +
       (external
         ? 'Responses are in Qualtrics, keyed by the participant, sessionNumber, notificationTime and timezone embedded data; a completed session is one the survey reported through its Web Service step.'
