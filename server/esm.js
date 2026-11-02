@@ -200,13 +200,13 @@ export const showCode = (code) => `${code.slice(0, 2)}-${code.slice(2, 6)}-${cod
 // Participants may type it with or without dashes and spaces, in any case.
 const canonical = (typed) => String(typed ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-function insertCode({ studyId, isTest, label = null, createdBy = null, sourceRun = null }) {
+function insertCode({ studyId, isTest, label = null, createdBy = null, sourceRun = null, externalRef = null }) {
   for (;;) {
     const code = newCode();
     const { changes } = db.prepare(
-      `INSERT OR IGNORE INTO esm_codes (code, study_id, is_test, label, created_by, source_run_id, source_study_id, source_participant_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(code, studyId, isTest ? 1 : 0, label, createdBy, sourceRun?.id ?? null, sourceRun?.study_id ?? null, sourceRun?.participant_id ?? null, now());
+      `INSERT OR IGNORE INTO esm_codes (code, study_id, is_test, label, created_by, source_run_id, source_study_id, source_participant_id, external_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(code, studyId, isTest ? 1 : 0, label, createdBy, sourceRun?.id ?? null, sourceRun?.study_id ?? null, sourceRun?.participant_id ?? null, externalRef, now());
     if (changes) return code;
   }
 }
@@ -247,6 +247,60 @@ export function codeForRun(run, targetStudyId) {
   }
   const existing = db.prepare('SELECT code FROM esm_codes WHERE source_run_id = ? AND study_id = ?').get(run.id, target.id);
   return showCode(existing?.code ?? insertCode({ studyId: target.id, isTest: run.is_test === 1, sourceRun: run }));
+}
+
+/* ---------- Codes for a Qualtrics intake survey ---------- */
+
+const issuedByIntake = (studyId) => db.prepare('SELECT COUNT(*) AS n FROM esm_codes WHERE study_id = ? AND external_ref IS NOT NULL').get(studyId).n;
+const MAX_INTAKE_CODES = 5000;
+
+/** What a researcher adds to an intake survey built in Qualtrics so each respondent gets their own code. */
+export function intakeSetup(user, studyId) {
+  const study = findStudy(user, studyId, 'edit');
+  const esm = esmOf(study.id);
+  if (!esm) throw new StudyError('This study has no ESM schedule yet: set_esm_schedule first.');
+  const key = esm.intake_key ?? newToken();
+  if (!esm.intake_key) db.prepare('UPDATE esm_studies SET intake_key = ? WHERE study_id = ?').run(key, study.id);
+  return {
+    study: study.id,
+    app_title: esm.app_title,
+    steps: [
+      'In the intake survey\'s Survey Flow, add an Embedded Data element (any name will do) with the field esmCode and no value, before the Web Service element.',
+      'After the consent and baseline questions, add a Web Service element: method GET, the URL below, with the query parameters listed. Under "Map fields from response", map the response key code to the embedded data field esmCode.',
+      'Add a block after it showing the code, e.g. "Your enrolment code is ${e://Field/esmCode}", with the install and enter instructions (below). Anyone who reloads or resumes the same response sees the same code.',
+      'Publish the survey (and again after any later change). Test it in the live survey rather than the preview.',
+    ],
+    web_service_url: `${config.runOrigin}/esm/code?key=${key}`,
+    web_service_query_parameters: { id: '${e://Field/ResponseID}' },
+    optional_query_parameters: {
+      ref: 'Something to find this person again, e.g. ${e://Field/PROLIFIC_PID}; shown in esm_status',
+      test: '1 while testing the intake: test codes run the study as test data and stay out of esm_status',
+    },
+    suggested_instructions:
+      'The next part of this study happens on your phone, over the coming days. 1. Install the free app: MetaForge Live from the App Store (iPhone) or MetaForge EMA from Google Play (Android). ' +
+      '2. Open it, agree to the terms, and enter this code: ${e://Field/esmCode}. Please write the code down or take a screenshot before you continue. It can be used once, on one phone. ' +
+      'Allow notifications when the app asks.',
+    note: 'One code per Qualtrics response, so a repeat call returns the same code. Up to ' + MAX_INTAKE_CODES + ' codes can be issued this way. The URL contains a secret: anyone who has it can issue codes.',
+  };
+}
+
+function issueForIntake(req, res) {
+  const q = { ...req.query, ...(req.body && typeof req.body === 'object' ? req.body : {}) };
+  const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  const key = str(q.key, 100);
+  const esm = key && db.prepare('SELECT * FROM esm_studies WHERE intake_key = ?').get(key);
+  if (!esm) return fail(res, 403, 'Invalid key');
+  if (isClosed(esm)) return fail(res, 410, 'This study is closed.');
+  const id = str(q.id, 100);
+  if (!id) return fail(res, 400, 'id is empty: send the response id (${e://Field/ResponseID}).');
+  const ref = str(q.ref, 100);
+  const existing = db.prepare('SELECT * FROM esm_codes WHERE external_ref = ? AND study_id = ?').get(id, esm.study_id);
+  if (existing?.withdrawn_at) return fail(res, 410, 'This participant\'s data was deleted.');
+  if (!existing && issuedByIntake(esm.study_id) >= MAX_INTAKE_CODES) return fail(res, 429, 'Too many codes issued for this study.');
+  const code = existing?.code ?? insertCode({
+    studyId: esm.study_id, isTest: ['1', 'true'].includes(str(q.test, 5)), label: ref ? `Qualtrics intake: ${ref}` : 'Qualtrics intake', externalRef: id,
+  });
+  res.json({ code: showCode(code) });
 }
 
 /* ---------- Runs started by the app ---------- */
@@ -304,6 +358,7 @@ export function esmStatus(user, studyId, { include_test = false } = {}) {
       ...(c.is_test && { test: true }),
       ...(c.label && { label: c.label }),
       ...(c.source_study_id && { from_study: c.source_study_id, from_participant: c.source_participant_id }),
+      ...(c.external_ref && { from_qualtrics_response: c.external_ref }),
       platform: [device.platform, device.osVersion].filter(Boolean).join(' ') || null,
       enrolled: iso(c.enrolled_at),
       ends: iso(c.enrolled_at + schedule.studyDuration * DAY),
@@ -458,6 +513,8 @@ function done(req, res) {
   log(changes ? 'counted' : 'repeat of a session already counted');
   res.json({ success: true });
 }
+esmApp.get('/esm/code', issueForIntake);
+esmApp.post('/esm/code', express.json({ limit: '4kb' }), express.urlencoded({ extended: false, limit: '4kb' }), issueForIntake);
 esmApp.get('/esm/done', done);
 esmApp.post('/esm/done', express.json({ limit: '4kb' }), express.urlencoded({ extended: false, limit: '4kb' }), done);
 

@@ -311,6 +311,9 @@ if (esmLink?.notnull) {
 addColumn('esm_studies', 'survey_url', 'TEXT');     // the hosted survey the app opens, instead of the live experiment
 addColumn('esm_studies', 'callback_key', 'TEXT');   // secret in the survey's completion call
 addColumn('esm_studies', 'closed_at', 'INTEGER');   // hosted surveys have no link to close
+addColumn('esm_studies', 'intake_key', 'TEXT');     // secret in the Qualtrics intake survey's code request
+addColumn('esm_codes', 'external_ref', 'TEXT');     // the Qualtrics response a code was issued to
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS esm_codes_external ON esm_codes(external_ref, study_id) WHERE external_ref IS NOT NULL');
 db.exec(`
   CREATE TABLE IF NOT EXISTS esm_sessions (
     study_id          TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,

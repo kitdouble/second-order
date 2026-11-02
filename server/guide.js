@@ -143,6 +143,9 @@ return [consent({ minutes: 10 }), demographics(), ...baseline, esmCode({ study: 
   submissions" must be off, and the survey must be re-published after every change (the usual cause of sessions not
   counting; esm_status shows recent completion calls to tell). start_with_survey: true gives a test code an
   immediate survey; otherwise the app only offers one inside a prompt's window. Test with create_esm_codes test: true; end the study with set_esm_schedule closed: true.
+- Intake survey built in Qualtrics: esm_intake_setup(ESM study id) returns a Web Service step that issues each
+  respondent their own code (one per Qualtrics response), the embedded data field to show it from, and suggested
+  instructions. Works for either kind of ESM study. Relay the steps, and have the researcher publish and test it.
 - Track with esm_status (enrolled, sessions, compliance) and study_status. Close the "ESM app sessions" link
   (close_participant_link) to end the study.
 

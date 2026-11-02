@@ -18,7 +18,7 @@ import { getDocument, listDocuments, saveDocument } from './documents.js';
 import { createDownloadLink, deleteData, deletionLog, summariseData } from './data.js';
 import { leaveFeedback, listFeedback, resolveFeedback } from './feedback.js';
 import { addPlaces, createDraft, demographics, launch, listProlificStudies, prolificStatus, setProlificStatus } from './prolific.js';
-import { createCodes, esmStatus, setSchedule } from './esm.js';
+import { createCodes, esmStatus, intakeSetup, setSchedule } from './esm.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
 const text = (value) => ({
@@ -494,6 +494,18 @@ export function buildServer() {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, handled(async ({ study_id, ...args }, extra) => text(createCodes(userOf(extra), study_id, args))));
+
+  server.registerTool('esm_intake_setup', {
+    title: 'ESM codes from a Qualtrics survey',
+    description:
+      'For an intake survey built in Qualtrics (consent, baseline measures) that should give each respondent their own enrolment code for an ESM study, ' +
+      'whether that study\'s survey is in Second Order or in Qualtrics. Returns what the researcher adds to the Qualtrics survey: a Web Service step ' +
+      '(a secret URL) that returns a code, the embedded data field to map it to, and suggested instructions to show. Relay the steps one at a time and ' +
+      'have them confirm the survey is published. One code per Qualtrics response; esm_status shows which response each code went to. ' +
+      '(For an intake study built in Second Order, use the esmCode block instead.)',
+    inputSchema: { study_id: z.string().describe('The ESM study (the one with the schedule), not the intake survey') },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id }, extra) => text(intakeSetup(userOf(extra), study_id))));
 
   server.registerTool('esm_status', {
     title: 'ESM status',
