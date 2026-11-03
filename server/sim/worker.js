@@ -6,12 +6,18 @@ import jsdom from 'jsdom';
 
 const { JSDOM, VirtualConsole } = jsdom;
 
-// A desktop Chrome, so browser detection (deviceCheck) sees a normal computer.
-const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+// A desktop Chrome by default, so browser detection (deviceCheck) sees a normal computer; input.device
+// asks for a phone or tablet instead, for studies that exclude computers.
+const USER_AGENTS = {
+  computer: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  phone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+  tablet: 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+};
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
 const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+const USER_AGENT = USER_AGENTS[input.device] ?? USER_AGENTS.computer;
 
 const logs = [];
 const virtualConsole = new VirtualConsole();

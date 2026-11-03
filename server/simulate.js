@@ -83,7 +83,13 @@ export async function simulate(user, studyId, { participants = 3, recruitment = 
     const runs = [];
     for (let i = 0; i < participants; i++) {
       const t = Date.now();
-      const result = await runOne({ bundle, recruitment, version: v.number, participant: i, simulationOptions: simulation_options });
+      const run = (device) => runOne({ bundle, recruitment, version: v.number, participant: i, simulationOptions: simulation_options, device });
+      let result = await run('computer');
+      // A deviceCheck that excludes computers stops the desktop participant: try the other devices.
+      for (const device of ['phone', 'tablet']) {
+        if (result.rows?.find((row) => row.stopped)?.stopped !== 'device') break;
+        result = await run(device);
+      }
       runs.push({ ...result, ms: Date.now() - t });
     }
 
