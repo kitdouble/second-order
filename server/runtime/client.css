@@ -53,3 +53,14 @@ body.so-preview {
   font-size: 12px;
   white-space: pre-wrap;
 }
+
+/* Standalone copy (study export): the data download links at the end. */
+.so-message a {
+  display: inline-block;
+  margin: 0.25rem 0;
+}
+
+.so-note {
+  font-size: 14px;
+  color: #555;
+}

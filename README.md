@@ -78,6 +78,8 @@ placeholder from your documents.
 | `check_launch` | owner, admin | simulate + pre-launch checklist (pass / warn / fail), shown in the panel |
 | `study_status` | owner, admin | completion, in progress / abandoned, dropout points, browser errors, durations |
 | `create_download_link` | owner, admin | one-hour link to the full CSV/JSON, outside the chat |
+| `export_study` | viewer (archive: owner) | one-hour link to a zip of the whole study: code, stimuli, standalone build, versions, documents, data; `publish` pseudonymises, `archive` keeps everything |
+| `import_study` | everyone | one-hour page to drop an export zip; always makes a new study |
 | `delete_participant_data` / `list_deletions` | owner, admin | withdrawals and test-data cleanup, logged without data |
 | `quality_report` / `set_exclusion_rules` | viewer / editor | durations and pay, dropouts, fast responders, attention checks, exclusions |
 | `share_study` / `list_members` / `remove_member` | owner | collaborators as editor or viewer |

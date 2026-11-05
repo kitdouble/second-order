@@ -10,6 +10,7 @@ import { mcp } from './mcp.js';
 import { runApp } from './run.js';
 import { uploads } from './uploads.js';
 import { downloads } from './data.js';
+import { imports } from './exports.js';
 import { collectGarbage } from './live.js';
 
 const app = express();
@@ -28,6 +29,7 @@ main.use((_req, res, next) => {
   next();
 });
 main.use('/api/uploads', uploads); // raw file bodies: before the JSON parser
+main.use('/api/imports', imports); // study export zips, likewise
 main.use(express.json({ limit: '8mb' })); // save_version and small add_stimulus payloads
 main.use(express.urlencoded({ extended: false, limit: '100kb' })); // OAuth token requests are form-encoded
 main.use(loadUser);

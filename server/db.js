@@ -366,7 +366,7 @@ export function findOpenInvite(token) {
 
 export function pruneExpired() {
   db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now());
-  for (const table of ['challenges', 'oauth_requests', 'oauth_codes', 'oauth_tokens', 'upload_links', 'download_links', 'prolific_quotes']) {
+  for (const table of ['challenges', 'oauth_requests', 'oauth_codes', 'oauth_tokens', 'upload_links', 'download_links', 'import_links', 'prolific_quotes']) {
     db.prepare(`DELETE FROM ${table} WHERE expires_at <= ?`).run(now());
   }
 }

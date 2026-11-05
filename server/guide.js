@@ -208,6 +208,9 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
    in pages of whole sessions (follow next_offset; filter rows and pick columns to fit more per page; test
    data excluded unless include_test); create_download_link gives the researcher the full file
    without it passing through the chat. Withdrawals: delete_participant_data, only when the researcher asks.
+7. Sharing and moving: export_study gives a zip of the whole study (code, stimuli, a standalone build that runs
+   with no server, versions, consent/debrief texts, data, README) to publish or back up; mode "publish"
+   pseudonymises participants, "archive" keeps everything. import_study turns an export back into a new study.
 
 ## Available packages (exact versions)
 

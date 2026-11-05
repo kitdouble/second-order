@@ -32,7 +32,8 @@ const format = (m) => (m.location ? `line ${m.location.line}:${m.location.column
 
 // manifest: {stimulus name: URL}, fixed into the bundle so a version always uses the same files.
 // external: leave packages unbundled (used for the quick shape check).
-function experimentPlugin(code, manifest = {}, { external = false, documents = {} } = {}) {
+// runtime: 'client' (the live runtime) or 'standalone' (the offline copy in a study export).
+function experimentPlugin(code, manifest = {}, { external = false, documents = {}, runtime = 'client' } = {}) {
   return {
     name: 'second-order',
     setup(b) {
@@ -43,7 +44,7 @@ function experimentPlugin(code, manifest = {}, { external = false, documents = {
       b.onLoad({ filter: /.*/, namespace: 'documents' }, () => ({ contents: JSON.stringify(documents), loader: 'json' }));
       b.onResolve({ filter: /^second-order$/ }, () => (external ? { path: 'second-order', external: true } : { path: resolve(root, 'server/lib/index.js') }));
       b.onResolve({ filter: /^second-order:runtime/ }, (args) => ({
-        path: resolve(root, 'server/runtime', args.path.endsWith('.css') ? 'client.css' : 'client.js'),
+        path: resolve(root, 'server/runtime', args.path.endsWith('.css') ? 'client.css' : `${runtime}.js`),
       }));
       b.onLoad({ filter: /.*/, namespace: 'experiment' }, () => ({ contents: code, loader: 'js', resolveDir: root }));
       // Imports written in the experiment itself must name an available package.
@@ -115,6 +116,26 @@ export async function compileExperiment(code, manifest = {}, documents = {}) {
   };
   const hash = createHash('sha256').update(js).update(css).digest('hex').slice(0, 16);
   return { js, css, packages, hash, warnings: result.warnings.map(format) };
+}
+
+// The same experiment for the standalone copy in a study export: no server, data downloaded at the end.
+// manifest maps stimulus names to paths relative to standalone/index.html.
+export async function compileStandalone(code, manifest = {}, documents = {}) {
+  try {
+    const result = await build({
+      stdin: { contents: entry, resolveDir: root, loader: 'js' },
+      bundle: true, write: false, minify: true, format: 'iife', target: ['es2020'],
+      outdir: 'out', entryNames: 'experiment', logLevel: 'silent', legalComments: 'none',
+      loader: { '.woff': 'dataurl', '.woff2': 'dataurl', '.svg': 'dataurl', '.png': 'dataurl' },
+      plugins: [experimentPlugin(code, manifest, { documents, runtime: 'standalone' })],
+    });
+    return {
+      js: result.outputFiles.find((f) => f.path.endsWith('.js'))?.text ?? '',
+      css: result.outputFiles.find((f) => f.path.endsWith('.css'))?.text ?? '',
+    };
+  } catch (err) {
+    throw new CompileError((err.errors ?? [{ text: err.message }]).map(format));
+  }
 }
 
 // The same experiment and stimuli, built to run under jsPsych's data-only simulation (server/sim/).

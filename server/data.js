@@ -5,6 +5,7 @@ import { db, hash, newToken, now } from './db.js';
 import { config } from './config.js';
 import { exportData, findStudy, iso, StudyError } from './studies.js';
 import { forgetParticipant } from './esm.js';
+import { sendExport } from './exports.js';
 
 const DOWNLOAD_MINUTES = 60;
 
@@ -24,7 +25,7 @@ export function createDownloadLink(user, studyId, { format = 'csv', include_test
 export const downloads = Router();
 
 // GET /api/downloads/:token: the full data set (no row limit), built when downloaded.
-downloads.get('/:token', (req, res) => {
+downloads.get('/:token', async (req, res) => {
   const link = db.prepare(
     `SELECT d.*, u.id AS uid, u.role, u.lab_member FROM download_links d JOIN users u ON u.id = d.user_id WHERE d.token_hash = ? AND d.expires_at > ?`
   ).get(hash(String(req.params.token)), now());
@@ -36,6 +37,15 @@ downloads.get('/:token', (req, res) => {
     study = findStudy(user, link.study_id);
   } catch {
     return res.status(403).type('text').send('You no longer have access to this study.');
+  }
+  if (options.kind === 'study') { // export_study: a zip of the whole study
+    try {
+      return await sendExport(user, study.id, options, res);
+    } catch (err) {
+      if (res.headersSent) return res.destroy();
+      if (!(err instanceof StudyError)) console.error(err);
+      return res.status(err instanceof StudyError ? 403 : 500).type('text').send(err instanceof StudyError ? err.message : 'The export failed.');
+    }
   }
   const data = exportData(user, study.id, { ...options, max_rows: Infinity });
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');

@@ -15,12 +15,14 @@ delete_participant_data
 delete_version
 esm_intake_setup
 esm_status
+export_study
 get_authoring_guide
 get_data
 get_document
 get_prolific_demographics
 get_study
 import_stimulus_from_url
+import_study
 launch_prolific_study
 leave_feedback
 list_deletions

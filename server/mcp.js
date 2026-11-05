@@ -19,6 +19,7 @@ import { createDownloadLink, deleteData, deletionLog, summariseData } from './da
 import { leaveFeedback, listFeedback, resolveFeedback } from './feedback.js';
 import { addPlaces, createDraft, demographics, launch, listProlificStudies, prolificStatus, requireProlific, setProlificStatus } from './prolific.js';
 import { createCodes, esmStatus, intakeSetup, setSchedule } from './esm.js';
+import { createExportLink, createImportLink } from './exports.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
 const text = (value) => ({
@@ -715,6 +716,40 @@ export function buildServer() {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, handled(async ({ study_id, ...args }, extra) => text(createDownloadLink(userOf(extra), study_id, args))));
+
+  server.registerTool('export_study', {
+    title: 'Export study',
+    description:
+      'A link (valid 1 hour) that downloads the whole study as one zip, to publish (OSF, GitHub, a journal supplement), back up, or move to ' +
+      'another Second Order with import_study. It has the live code, stimuli, a standalone build that runs in any browser with no server, ' +
+      'revision notes and saved versions, the consent/debrief texts used, the data as CSV, a README and a manifest for importing. ' +
+      'mode "publish" (default) is safe to share: participant IDs become P001, P002… (in trial data too) and URL parameters, browser strings, ' +
+      'completion URLs and test data are left out; free-text answers are kept, so tell the researcher to check them. mode "archive" keeps ' +
+      'everything, raw IDs included (owner only): only when the researcher asks for a full backup or to move the study. ' +
+      'Before publishing, offer authors and a license so the zip gets a CITATION.cff and LICENSE.',
+    inputSchema: {
+      study_id: z.string(),
+      mode: z.enum(['publish', 'archive']).default('publish'),
+      include_data: z.boolean().default(true).describe('false to export only the materials (code, stimuli, versions, documents)'),
+      include_test: z.boolean().optional().describe('archive only: include preview (test) sessions (default true); publish never includes them'),
+      authors: z.array(z.string().min(1).max(120)).max(50).optional().describe('Names for CITATION.cff, e.g. ["Ada Lovelace", "Alan Turing"]'),
+      license: z.string().regex(/^[A-Za-z0-9.+-]{2,40}$/).optional().describe('SPDX licence id for the materials and data, e.g. "CC-BY-4.0"'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => text(createExportLink(userOf(extra), study_id, args))));
+
+  server.registerTool('import_study', {
+    title: 'Import study',
+    description:
+      'A link (valid 1 hour) to a page where the researcher drops a study export zip (from export_study, here or on another Second Order, ' +
+      'including one re-zipped from a repository). It always makes a new study owned by them, with the code (recompiled), stimuli, saved ' +
+      'versions, revision notes, exclusion rules and data (on closed "Imported" links). Changed code or stimuli are imported and reported; ' +
+      'changed participant data is refused. Ask the researcher to tell you when the page shows it is done, then get_study.',
+    inputSchema: {
+      title: z.string().min(1).max(120).optional().describe('Title for the new study; defaults to the exported title'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ title }, extra) => text(createImportLink(userOf(extra), { title }))));
 
   server.registerTool('delete_participant_data', {
     title: 'Delete participant data',
