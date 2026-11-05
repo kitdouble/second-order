@@ -290,14 +290,14 @@ export function createUploadLink(user, studyId) {
 
 export function openUploadLink(token) {
   const row = db.prepare(
-    `SELECT l.*, s.title, u.id AS uid, u.email, u.name AS uname, u.role FROM upload_links l
+    `SELECT l.*, s.title, u.id AS uid, u.email, u.name AS uname, u.role, u.lab_member FROM upload_links l
      JOIN studies s ON s.id = l.study_id JOIN users u ON u.id = l.user_id
      WHERE l.token_hash = ? AND l.expires_at > ?`
   ).get(hash(String(token)), now());
   if (!row) return null;
   return {
     study: { id: row.study_id, title: row.title },
-    user: { id: row.uid, email: row.email, name: row.uname, role: row.role },
+    user: { id: row.uid, email: row.email, name: row.uname, role: row.role, lab_member: Boolean(row.lab_member) },
     expiresAt: row.expires_at,
   };
 }

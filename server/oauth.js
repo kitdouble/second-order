@@ -155,7 +155,7 @@ const provider = {
 
   async verifyAccessToken(token) {
     const row = db.prepare(
-      `SELECT t.*, u.email, u.name, u.role FROM oauth_tokens t JOIN users u ON u.id = t.user_id
+      `SELECT t.*, u.email, u.name, u.role, u.lab_member FROM oauth_tokens t JOIN users u ON u.id = t.user_id
        WHERE t.token_hash = ? AND t.kind = 'access' AND t.expires_at > ?`
     ).get(hash(token), now());
     if (!row || row.resource !== config.mcpUrl) throw new InvalidTokenError('Invalid or expired access token');
@@ -165,7 +165,7 @@ const provider = {
       scopes: row.scopes.split(' '),
       expiresAt: Math.floor(row.expires_at / 1000),
       resource: new URL(row.resource),
-      extra: { user: { id: row.user_id, email: row.email, name: row.name, role: row.role } },
+      extra: { user: { id: row.user_id, email: row.email, name: row.name, role: row.role, lab_member: Boolean(row.lab_member) } },
     };
   },
 

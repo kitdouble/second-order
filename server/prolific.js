@@ -6,7 +6,7 @@
 // researcher per calendar month; admins are exempt. Every spend is recorded in prolific_spend.
 import { randomBytes } from 'node:crypto';
 import { db, hash, newToken, now } from './db.js';
-import { closeLink, createLink, findStudy, iso, linkUrl, StudyError } from './studies.js';
+import { closeLink, createLink, findStudy, iso, isLabMember, linkUrl, StudyError } from './studies.js';
 import { currentRevision } from './live.js';
 import { checkLaunch } from './monitor.js';
 import { PROLIFIC_GBP_PER_HOUR } from './lib/context.js';
@@ -173,6 +173,14 @@ function prolificDevices(code) {
   return devices.map((d) => DEVICE_NAMES[d]).filter(Boolean);
 }
 
+/** Prolific runs on the lab's account and money: only lab members (and admins) can use it. */
+export function requireProlific(user) {
+  if (!isLabMember(user)) {
+    throw new StudyError('Prolific is the lab\'s account and budget, so it isn\'t available on your account. Run the study with a participant link ' +
+      '(create_participant_link), or ask an admin to run it on Prolific for you.');
+  }
+}
+
 /* ---------- Spending ---------- */
 
 const monthStart = (at = now()) => { const d = new Date(at); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1); };
@@ -227,6 +235,7 @@ function findProlific(user, studyId, prolificId) {
 }
 
 export async function createDraft(user, studyId, { places, label, name, description, exclude_studies = [], exclude_participants = [] }) {
+  requireProlific(user);
   const study = findStudy(user, studyId, 'edit');
   const v = currentRevision(study.id);
   if (!v) throw new StudyError('Write the experiment (update_experiment) before making a Prolific study.');
@@ -342,6 +351,7 @@ function parsePublishAt(publishAt) {
 }
 
 export async function launch(user, studyId, { prolific_id, publish_at, confirm_code }) {
+  requireProlific(user);
   const { study, row } = findProlific(user, studyId, prolific_id);
   const publishAt = confirm_code ? null : parsePublishAt(publish_at);
   const remote = await call('GET', `/studies/${row.prolific_id}/`);
@@ -397,6 +407,7 @@ export async function launch(user, studyId, { prolific_id, publish_at, confirm_c
 }
 
 export async function addPlaces(user, studyId, { prolific_id, places, confirm_code }) {
+  requireProlific(user);
   const { study, row } = findProlific(user, studyId, prolific_id);
   const remote = await call('GET', `/studies/${row.prolific_id}/`);
   const total = Number(remote.total_available_places) + places;
@@ -465,6 +476,7 @@ const csvCell = (v) => (v == null ? '' : /[",\n\r]/.test(String(v)) ? `"${String
  * any of the lab's Prolific study ids.
  */
 export async function demographics(user, studyId, { prolific_id }) {
+  requireProlific(user);
   const study = findStudy(user, studyId, 'view');
   let ids = db.prepare('SELECT prolific_id FROM prolific_studies WHERE study_id = ? ORDER BY created_at').all(study.id).map((r) => r.prolific_id);
   if (prolific_id) {
@@ -504,6 +516,7 @@ export async function demographics(user, studyId, { prolific_id }) {
 /* ---------- Status and pausing ---------- */
 
 export async function prolificStatus(user, studyId) {
+  requireProlific(user);
   const study = findStudy(user, studyId, 'view');
   const rows = db.prepare('SELECT * FROM prolific_studies WHERE study_id = ? ORDER BY created_at').all(study.id);
   const studies = await Promise.all(rows.map(async (row) => {
@@ -536,6 +549,7 @@ export async function prolificStatus(user, studyId) {
 const TRANSITIONS = { pause: 'PAUSE', resume: 'START', stop: 'STOP', cancel_schedule: 'CANCEL_PUBLISH' };
 
 export async function setProlificStatus(user, studyId, { prolific_id, action, researcher_confirmed }) {
+  requireProlific(user);
   const { study, row } = findProlific(user, studyId, prolific_id);
   if (action === 'stop' && researcher_confirmed !== true) {
     throw new StudyError('Stopping ends recruitment for good. Confirm with the researcher first, then set researcher_confirmed.');

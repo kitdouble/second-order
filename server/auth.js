@@ -99,8 +99,8 @@ auth.post('/invite/:token/verify', async (req, res) => {
   try {
     const existing = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
     if (!existing) {
-      db.prepare('INSERT INTO users (id, email, name, role, created_at) VALUES (?, ?, ?, ?, ?)')
-        .run(userId, invite.email, invite.name, invite.role, now());
+      db.prepare('INSERT INTO users (id, email, name, role, lab_member, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(userId, invite.email, invite.name, invite.role, invite.lab_member ?? 1, now());
     }
     db.prepare(
       `INSERT INTO credentials (id, user_id, public_key, counter, transports, created_at)

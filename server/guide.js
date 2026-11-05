@@ -53,8 +53,10 @@ export default function buildTimeline(jsPsych, context) {
 - Other randomisation (trial order etc.): jsPsych's own (randomize_order, sample, jsPsych.randomization.*).
   Second Order seeds it per participant, so a participant who reloads gets the same order.
 - Give attention checks a name containing "attention check" so check_launch and the data can find them.
-- Consent and debrief texts live in the document library (list_documents / get_document), never in experiment
-  code. Never write or paste consent or debrief wording into trials.
+- Consent and debrief texts come from the document library (list_documents / get_document) or are written inline
+  with consent({ html, ethics }) / debrief({ html, ethics }), where ethics is the researcher's approval reference.
+  Use the wording the researcher gives you, verbatim; never invent or reword consent or debrief text, and never
+  write it into a plain trial of your own: the blocks record which text each participant saw.
 
 ## Experience sampling (ESM) studies
 
@@ -90,8 +92,13 @@ return [deviceCheck({ devices: ["computer"] }), consent({ minutes: 15 }), demogr
   Participants on other devices are told why and the run ends without the completion redirect (not paid).
   Saves device_type, device_allowed, browser, OS and window size. Don't write your own device checks.
 - consent({ minutes, document }): the Participant Information Statement and consent from the document library
-  for the link's recruitment. document defaults to the lab's main protocol (see list_documents); ask the
-  researcher which protocol covers the study. A fresh install only has "example-protocol", placeholder wording that is
+  for the link's recruitment. For a lab member's account document defaults to the lab's main protocol (see
+  list_documents); ask the researcher which protocol covers the study. An account that is not a lab member (see
+  whoami: lab_member false) has NO default: it must name its own document, or write the text in the study with
+  consent({ minutes, html, ethics }): html is the full Participant Information Statement as HTML (placeholders
+  {{minutes}}, {{payment}}, {{credit}}, {{logo}}; use the pis-* classes of get_document texts for the same layout),
+  ethics is the approval reference (e.g. "HREC 2026/123"). Ask the researcher for both; never make up either.
+  The data records ethics and a fingerprint of the text as consent_form. A fresh install only has "example-protocol", placeholder wording that is
   not ethics-approved: the researcher must add their approved texts with save_document before real participants. minutes is the study length; it fills in the length and the
   Prolific payment (£6/hour) or SONA credit (1/hour, rounded up to 0.25). A protocol may have no
   in-lab form: if needed, the researcher provides approved wording and you add it with save_document.
@@ -100,7 +107,8 @@ return [deviceCheck({ devices: ["computer"] }), consent({ minutes: 15 }), demogr
 - fullscreen(): asks to switch to full screen before the task (skipped where impossible, e.g. iPhones).
 - preload(jsPsych): loads every stimulus of the study before the task; stops the run if loading fails.
 - debrief({ document }): the document's debrief for the link's recruitment, put last; skipped where the
-  document has none for that recruitment.
+  document has none for that recruitment. debrief({ html, ethics }) writes it in the study instead (shown to
+  every recruitment), recorded as debrief_form.
 - Changing consent or debrief wording: only when the researcher explicitly asks. get_document, show them the
   exact new wording or changes, wait for their explicit confirmation, then save_document with a new form_label
   and researcher_confirmed: true. Live experiments using that document pick it up automatically.
@@ -185,7 +193,7 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
    participant experience and saves test data; add ?condition=speed to it to preview one condition.
 4. check_launch (with the recruitment, completion URL and the columns the analysis needs); fix every fail and
    go through warnings with the researcher.
-5. When they are happy: for Prolific, create_prolific_draft (makes the link and the Prolific study: lab advert,
+5. When they are happy: for Prolific (lab members only; whoami shows lab_member), create_prolific_draft (makes the link and the Prolific study: lab advert,
    US and UK, balanced male/female, pay from consent minutes), then launch_prolific_study and add_prolific_places,
    which return a quote first: show it, and send the confirm_code only after the researcher says yes. Spending
    is capped per study and per researcher per month. For SONA and others, create_participant_link. Links run

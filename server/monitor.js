@@ -143,9 +143,11 @@ export async function checkLaunch(user, studyId, { recruitment = 'prolific', com
   // Ethics blocks
   if (recruitment === 'prolific' || recruitment === 'sona') {
     if (has('consent_form') && Object.keys(counts('consent_form')).some((label) => label.startsWith('TEMPLATE'))) {
-      add('fail', 'Consent form', 'This study shows the placeholder template, which is not ethics-approved. Add your approved consent with save_document and point consent({ document }) at it.');
+      add('fail', 'Consent form', 'This study shows the placeholder template, which is not ethics-approved. Add your approved consent with save_document and point consent({ document }) at it, or write it in the study with consent({ html, ethics }).');
     } else if (has('consent_form')) add('pass', 'Consent form', `Shown: ${Object.keys(counts('consent_form')).join(', ')}.`);
     else add('warn', 'Consent form', 'No consent() block found. Only fine if the study uses its own ethics-approved consent trial.');
+  } else if (has('consent_form') && !Object.keys(counts('consent_form')).some((label) => label.startsWith('TEMPLATE'))) {
+    add('pass', 'Consent form', `Shown: ${Object.keys(counts('consent_form')).join(', ')}.`);
   } else {
     add('warn', 'Consent form', 'There is no approved in-lab consent form in Second Order: check the study includes your approved wording.');
   }

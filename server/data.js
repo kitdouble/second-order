@@ -26,11 +26,11 @@ export const downloads = Router();
 // GET /api/downloads/:token: the full data set (no row limit), built when downloaded.
 downloads.get('/:token', (req, res) => {
   const link = db.prepare(
-    `SELECT d.*, u.id AS uid, u.role FROM download_links d JOIN users u ON u.id = d.user_id WHERE d.token_hash = ? AND d.expires_at > ?`
+    `SELECT d.*, u.id AS uid, u.role, u.lab_member FROM download_links d JOIN users u ON u.id = d.user_id WHERE d.token_hash = ? AND d.expires_at > ?`
   ).get(hash(String(req.params.token)), now());
   if (!link) return res.status(404).type('text').send('This download link has expired. Ask Claude or ChatGPT for a new one.');
   const options = JSON.parse(link.options);
-  const user = { id: link.uid, role: link.role };
+  const user = { id: link.uid, role: link.role, lab_member: Boolean(link.lab_member) };
   let study;
   try {
     study = findStudy(user, link.study_id);

@@ -41,6 +41,7 @@ save_document
 save_version
 set_esm_schedule
 set_exclusion_rules
+set_lab_member
 set_prolific_status
 share_study
 show_dashboard

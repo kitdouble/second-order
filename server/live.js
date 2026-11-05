@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { db, newId, newToken, now } from './db.js';
 import { compileExperiment } from './compile.js';
 import { currentManifest, FILES_DIR, fileUrl } from './stimuli.js';
-import { documentSnapshot } from './documents.js';
+import { studyDocuments } from './documents.js';
 import { createStudy, findStudy, iso, StudyError } from './studies.js';
 import { config } from './config.js';
 
@@ -46,7 +46,7 @@ const sameManifest = (a, b) => {
 async function build(studyId, { code, notes, userId }) {
   const stimuli = currentManifest(studyId);
   const urls = Object.fromEntries(Object.entries(stimuli).map(([name, sha]) => [name, fileUrl(name, sha)]));
-  const documents = documentSnapshot();
+  const documents = studyDocuments(studyId);
   const compiled = await compileExperiment(code, urls, documents); // throws CompileError with line numbers
 
   const id = newId();
@@ -75,7 +75,7 @@ const rebuilding = new Map();
 export async function ensureCurrent(studyId) {
   const revision = currentRevision(studyId);
   if (!revision) return null;
-  const docsUnchanged = (revision.documents ?? '') === JSON.stringify(documentSnapshot());
+  const docsUnchanged = (revision.documents ?? '') === JSON.stringify(studyDocuments(studyId));
   if (sameManifest(JSON.parse(revision.stimuli), currentManifest(studyId)) && docsUnchanged && revision.bundle_js) return revision;
   if (!rebuilding.has(studyId)) {
     rebuilding.set(studyId, build(studyId, { code: revision.code, notes: 'Rebuilt: stimuli or consent texts changed', userId: revision.created_by })

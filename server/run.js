@@ -7,7 +7,7 @@ import { db, hash, newId, newToken, now } from './db.js';
 import { FILES_DIR, MIME, fileUrl } from './stimuli.js';
 import { compileDashboard, RUNTIME_VERSION } from './compile.js';
 import { currentRevision, ensureCurrent } from './live.js';
-import { documentSnapshot } from './documents.js';
+import { studyDocuments } from './documents.js';
 import { appRun, codeForRun, esmApp } from './esm.js';
 import { StudyError } from './studies.js';
 
@@ -101,7 +101,7 @@ runApp.get('/d/:token', async (req, res) => {
     const stimuli = JSON.parse(row.stimuli);
     const manifest = Object.fromEntries(Object.entries(stimuli).map(([name, sha]) => [name, fileUrl(name, sha)]));
     try {
-      const built = await compileDashboard(row.code, manifest, row.documents ? JSON.parse(row.documents) : documentSnapshot());
+      const built = await compileDashboard(row.code, manifest, row.documents ? JSON.parse(row.documents) : studyDocuments(link.study_id));
       db.prepare('UPDATE study_versions SET dash_js = ?, dash_css = ?, dash_hash = ?, dash_build = ? WHERE id = ?')
         .run(built.js, built.css, built.hash, RUNTIME_VERSION, row.id);
       hash = built.hash;

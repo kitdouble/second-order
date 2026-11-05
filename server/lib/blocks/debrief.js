@@ -1,18 +1,21 @@
 import htmlButtonResponse from "@jspsych/plugin-html-button-response";
-import { findDocument, fill } from "../documents.js";
+import { findDocument, fill, inlineDocument } from "../documents.js";
 import { recruitment } from "../context.js";
 // Same layout as the Participant Information Statement.
 import "./consent.css";
 
-// Debrief statement from the document library (default: the lab's oldest protocol).
+// Debrief statement from the document library (default for lab members: the lab's oldest protocol), or written in the study.
 
 /**
  * The debrief for this link's participants, if the document has one for their recruitment, and
  * skipped otherwise. Put it last in the timeline, after the task.
  */
-export function debrief({ document } = {}) {
-  // Recruitment is known when the timeline is built, so the text can be picked now.
-  const doc = findDocument(document, "debrief", recruitment());
+export function debrief({ document, html, ethics } = {}) {
+  // Recruitment is known when the timeline is built, so the text can be picked now. `html` and `ethics` write the
+  // debrief in the study itself (shown to every recruitment); `ethics` is the approval reference, recorded as debrief_form.
+  const doc = html !== undefined || ethics !== undefined
+    ? inlineDocument("debrief", html, ethics, document)
+    : findDocument(document, "debrief", recruitment());
   return {
     name: "Debrief",
     conditional_function: () => Boolean(doc),

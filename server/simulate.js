@@ -5,7 +5,7 @@ import { runLocally } from './sim/sandbox.js';
 import { compileSimulation } from './compile.js';
 import { findStudy, StudyError } from './studies.js';
 import { fileUrl } from './stimuli.js';
-import { documentSnapshot } from './documents.js';
+import { studyDocuments } from './documents.js';
 import { ensureCurrent } from './live.js';
 
 /* ---------- Running one participant ---------- */
@@ -76,7 +76,7 @@ export async function simulate(user, studyId, { participants = 3, recruitment = 
   if (!v) throw new StudyError('This study has no experiment yet. Write it with update_experiment.');
 
   const manifest = Object.fromEntries(Object.entries(JSON.parse(v.stimuli)).map(([name, sha]) => [name, fileUrl(name, sha)]));
-  const bundle = await compileSimulation(v.code, manifest, v.documents ? JSON.parse(v.documents) : documentSnapshot(v.created_at));
+  const bundle = await compileSimulation(v.code, manifest, v.documents ? JSON.parse(v.documents) : studyDocuments(study.id, v.created_at));
 
   return exclusive(async () => {
     const started = Date.now();

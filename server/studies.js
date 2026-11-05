@@ -17,6 +17,9 @@ export class StudyError extends Error {
   }
 }
 
+/** Lab members (and admins) can use the lab's Prolific account and default protocol; invited colleagues cannot. */
+export const isLabMember = (user) => user?.role === 'admin' || Boolean(user?.lab_member);
+
 const slugify = (title) =>
   title.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'study';
 

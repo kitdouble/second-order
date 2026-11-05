@@ -17,7 +17,7 @@ import { qualityReport, setExclusionRules } from './quality.js';
 import { getDocument, listDocuments, saveDocument } from './documents.js';
 import { createDownloadLink, deleteData, deletionLog, summariseData } from './data.js';
 import { leaveFeedback, listFeedback, resolveFeedback } from './feedback.js';
-import { addPlaces, createDraft, demographics, launch, listProlificStudies, prolificStatus, setProlificStatus } from './prolific.js';
+import { addPlaces, createDraft, demographics, launch, listProlificStudies, prolificStatus, requireProlific, setProlificStatus } from './prolific.js';
 import { createCodes, esmStatus, intakeSetup, setSchedule } from './esm.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
@@ -109,11 +109,24 @@ export function buildServer() {
       name: z.string().min(1).describe('Full name of the person being invited'),
       email: z.string().email().describe('Their email address (their account identifier)'),
       admin: z.boolean().default(false).describe('Make them an admin. Only do this if explicitly asked.'),
+      lab_member: z.boolean().default(true).describe('false for a colleague outside the lab: they can build and run studies with their own consent/debrief, but cannot use Prolific or the lab\'s default protocol.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, adminOnly(async ({ name, email, admin }, extra) => {
-    const { url } = createInvite({ name, email, role: admin ? 'admin' : 'member', createdBy: userOf(extra).id });
-    return text(`Invite for ${name} <${email}>${admin ? ' as admin' : ''}. Single use, expires in ${config.inviteDays} days:\n\n${url}`);
+  }, adminOnly(async ({ name, email, admin, lab_member }, extra) => {
+    const { url } = createInvite({ name, email, role: admin ? 'admin' : 'member', labMember: lab_member, createdBy: userOf(extra).id });
+    return text(`Invite for ${name} <${email}>${admin ? ' as admin' : ''}${lab_member ? '' : ' (not a lab member: no Prolific, no default protocol)'}. Single use, expires in ${config.inviteDays} days:\n\n${url}`);
+  }));
+
+  server.registerTool('set_lab_member', {
+    title: 'Set lab member',
+    description: 'Admin only. Say whether an existing user is a lab member (can use Prolific and the lab\'s default protocol) or an outside colleague (cannot).',
+    inputSchema: { email: z.string().email(), lab_member: z.boolean() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, adminOnly(async ({ email, lab_member }) => {
+    const done = db.prepare('UPDATE users SET lab_member = ? WHERE email = ?').run(lab_member ? 1 : 0, email.trim());
+    return done.changes
+      ? text(`${email} is now ${lab_member ? 'a lab member' : 'not a lab member (no Prolific, no default protocol)'}.`)
+      : { ...text(`No user with the email ${email}.`), isError: true };
   }));
 
   /* ---------- Experiments ---------- */
@@ -584,7 +597,7 @@ export function buildServer() {
       'they belong to if any. Use it to find similar studies whose participants to exclude in create_prolific_draft.',
     inputSchema: { search: z.string().max(200).optional().describe('Words that must all appear in the title, e.g. "metacognition"') },
     annotations: { readOnlyHint: true, openWorldHint: true },
-  }, handled(async (args) => text(await listProlificStudies(args))));
+  }, handled(async (args, extra) => { requireProlific(userOf(extra)); return text(await listProlificStudies(args)); }));
 
   server.registerTool('get_prolific_demographics', {
     title: 'Get Prolific demographics',

@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, now } from './db.js';
-import { iso, StudyError } from './studies.js';
+import { iso, isLabMember, StudyError } from './studies.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -70,6 +70,17 @@ export function documentSnapshot(at) {
     ((snapshot[d.doc_key] ??= {})[d.kind] ??= {})[d.recruitment] = { id: d.id, title: d.title, form_label: d.form_label, html: d.html };
   }
   return snapshot;
+}
+
+/**
+ * The texts a study is built with. For a lab member's study it is documentSnapshot() unchanged (the lab's
+ * oldest protocol is the default). For an outside colleague's study `_default` is null, so consent() and
+ * debrief() must be given their own `document`, or their text inline; they never fall back to the lab's protocol.
+ */
+export function studyDocuments(studyId, at) {
+  const owner = db.prepare('SELECT u.role, u.lab_member FROM studies s JOIN users u ON u.id = s.owner_id WHERE s.id = ?').get(studyId);
+  const snapshot = documentSnapshot(at);
+  return !owner || isLabMember(owner) ? snapshot : { ...snapshot, _default: null };
 }
 
 export function listDocuments() {

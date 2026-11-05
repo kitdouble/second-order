@@ -30,7 +30,7 @@ export function loadUser(req, _res, next) {
   const token = readCookie(req, COOKIE);
   req.user = token
     ? db.prepare(
-        `SELECT u.id, u.email, u.name, u.role FROM sessions s
+        `SELECT u.id, u.email, u.name, u.role, u.lab_member FROM sessions s
          JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = ? AND s.expires_at > ?`
       ).get(hash(token), now()) ?? null

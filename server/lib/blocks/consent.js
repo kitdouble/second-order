@@ -1,5 +1,5 @@
 import htmlButtonResponse from "@jspsych/plugin-html-button-response";
-import { documentFor, fill } from "../documents.js";
+import { documentFor, fill, inlineDocument } from "../documents.js";
 import { compensation, recruitment } from "../context.js";
 import "./consent.css";
 
@@ -9,10 +9,14 @@ import "./consent.css";
 
 /**
  * The consent form for this link's participants (Prolific, SONA or lab), filled in with the study length
- * and the credit or payment it works out to. `document` picks another protocol's approved text; without it the lab's default protocol is used.
+ * and the credit or payment it works out to. `document` picks a protocol's text from the library; without it a lab
+ * member's studies use the lab's default protocol. Or write the text in the study with `html` (the full Participant
+ * Information Statement) and `ethics` (the approval reference), which is recorded in the data as consent_form.
  */
-export function consent({ minutes, document } = {}) {
-  const doc = documentFor(document, "consent", recruitment());
+export function consent({ minutes, document, html, ethics } = {}) {
+  const doc = html !== undefined || ethics !== undefined
+    ? inlineDocument("consent", html, ethics, document)
+    : documentFor(document, "consent", recruitment());
   const needsPay = /\{\{(payment|credit)\}\}/.test(doc.html);
   const pay = compensation(minutes);
   if (!(Number(minutes) > 0) || (needsPay && !pay)) {

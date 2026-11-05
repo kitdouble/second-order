@@ -41,7 +41,12 @@ What Claude will be doing (you can also do it by hand):
    - Each edit is a new version with its own `form_label` (recorded in the data as `consent_form` /
      `debrief_form`), so you can always tell which text each participant saw.
    - `consent()` and `debrief()` use the lab's oldest document that isn't the example when no `document` is named.
-     Name one with `consent({ minutes, document: "hrec-2025-123" })`.
+     Name one with `consent({ minutes, document: "hrec-2025-123" })`. Or write the text in the study itself:
+     `consent({ minutes, html, ethics: "HREC 2026/123" })` (same for `debrief`); the approval reference and a
+     fingerprint of the text are recorded as `consent_form` / `debrief_form`.
+   - Colleagues outside the lab: invite them with `lab_member: false` (or `npm run invite -- --not-lab`, or
+     `set_lab_member` for an existing user). They cannot use Prolific, and `consent()` / `debrief()` never fall back to the
+     lab's default protocol for them: they name their own `document` or write the text inline. Admins are always lab members.
 4. **Check lab-specific defaults.** Pay rates (6 GBP/hour for Prolific, 1 credit/hour for SONA) are in
    `server/lib/context.js`. Prolific is optional: set `PROLIFIC_API_TOKEN` (see `.env.example`).
    `CLAUDE.md` describes the original maintainer's git workflow (push straight to `main`, which deploys); edit it

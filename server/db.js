@@ -175,6 +175,9 @@ function addColumn(table, column, definition) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }
+// Lab members (the default) can use Prolific and the lab's default protocol; colleagues invited with lab_member false cannot.
+addColumn('users', 'lab_member', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('invites', 'lab_member', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('runs', 'stopped', 'TEXT'); // why a block ended the run early, e.g. "device"
 addColumn('study_versions', 'stimuli', "TEXT NOT NULL DEFAULT '{}'"); // JSON {name: sha256} fixed at save
 // Dashboard bundle, built on first view and rebuilt when the dashboard code (package version) changes.
@@ -346,12 +349,12 @@ export const newId = () => randomUUID();
 export const newToken = () => randomBytes(32).toString('base64url');
 export const hash = (token) => createHash('sha256').update(token).digest('hex');
 
-export function createInvite({ email, name, role = 'member', createdBy = null }) {
+export function createInvite({ email, name, role = 'member', labMember = true, createdBy = null }) {
   const token = newToken();
   db.prepare(
-    `INSERT INTO invites (token_hash, email, name, role, created_by, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(hash(token), email.trim(), name.trim(), role, createdBy, now(), now() + config.inviteDays * DAY);
+    `INSERT INTO invites (token_hash, email, name, role, lab_member, created_by, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(hash(token), email.trim(), name.trim(), role, labMember ? 1 : 0, createdBy, now(), now() + config.inviteDays * DAY);
   return { token, url: `${config.origin}/invite/${token}` };
 }
 

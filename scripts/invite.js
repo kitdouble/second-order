@@ -9,16 +9,17 @@ const { values } = parseArgs({
     name: { type: 'string' },
     email: { type: 'string' },
     admin: { type: 'boolean', default: false },
+    'not-lab': { type: 'boolean', default: false },
   },
 });
 
 if (!values.email || !values.name) {
-  console.error('Usage: npm run invite -- --name "Full Name" --email person@example.com [--admin]');
+  console.error('Usage: npm run invite -- --name "Full Name" --email person@example.com [--admin] [--not-lab]');
   process.exit(1);
 }
 
 const existing = db.prepare('SELECT name, role FROM users WHERE email = ?').get(values.email);
-const { url } = createInvite({ email: values.email, name: values.name, role: values.admin ? 'admin' : 'member' });
+const { url } = createInvite({ email: values.email, name: values.name, role: values.admin ? 'admin' : 'member', labMember: !values['not-lab'] });
 
 console.log(existing
   ? `\n${existing.name} already has an account; this link adds a new passkey to it.`
