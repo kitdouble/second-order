@@ -8,7 +8,7 @@ export default function AuthLayout({ subtitle, children }) {
         {children}
       </div>
       <footer>
-        <p>&copy; {new Date().getFullYear()} Kit Double. All Rights Reserved.</p>
+        <p><a href="/about">About</a> · &copy; {new Date().getFullYear()} Kit Double. All Rights Reserved.</p>
       </footer>
     </div>
   );
