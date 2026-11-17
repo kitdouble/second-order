@@ -1,7 +1,7 @@
 // Stimulus files (images, audio, video, small data files). Stored once by content hash in
 // <data dir>/files; each study has a current set of names, and each version fixes the set it was saved with.
 import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { lookup } from 'node:dns/promises';
 import { request } from 'node:https';
 import { isIP } from 'node:net';
@@ -115,6 +115,21 @@ function record(study, user, name, { sha256, size }) {
 export async function addFromStream(study, user, rawName, stream) {
   const name = checkName(rawName);
   return record(study, user, name, await storeStream(stream));
+}
+
+// Files unpacked from an uploaded zip (create_upload_url). Every name is checked before anything is stored,
+// so a zip with one bad name adds nothing.
+export async function addFromDir(study, user, dir, paths, prefix = '') {
+  const folder = String(prefix ?? '').replace(/^\/+|\/+$/g, '');
+  const names = paths.map((path) => checkName(folder ? `${folder}/${path}` : path));
+  const added = [];
+  for (const [i, name] of names.entries()) added.push(record(study, user, name, await storeStream(createReadStream(join(dir, paths[i])))));
+  return {
+    added: added.length,
+    replaced: added.filter((f) => f.replaced).length,
+    total_mb: Math.round(added.reduce((sum, f) => sum + f.size, 0) / 1024 / 102.4) / 10,
+    names: added.length > 50 ? [...added.slice(0, 50).map((f) => f.name), `…and ${added.length - 50} more`] : added.map((f) => f.name),
+  };
 }
 
 export function addStimulus(user, studyId, { name: rawName, content, encoding }) {
@@ -285,6 +300,33 @@ export function createUploadLink(user, studyId) {
     url: `${config.origin}/upload/${token}`,
     expires_in_minutes: UPLOAD_LINK_MINUTES,
     note: 'Give this link to the researcher to drag files in. Anyone with the link can upload to this study until it expires.',
+  };
+}
+
+// The same token as an upload link, handed to the assistant so it can PUT files from its own sandbox
+// (curl) without the bytes passing through the chat.
+export function createUploadUrl(user, studyId) {
+  const study = findStudy(user, studyId, 'edit');
+  const token = newToken();
+  db.prepare('INSERT INTO upload_links (token_hash, study_id, user_id, expires_at) VALUES (?, ?, ?, ?)')
+    .run(hash(token), study.id, user.id, now() + UPLOAD_LINK_MINUTES * 60 * 1000);
+  const base = `${config.origin}/api/uploads/${token}`;
+  return {
+    file_url: `${base}/files?name=`,
+    zip_url: `${base}/zip`,
+    expires_in_minutes: UPLOAD_LINK_MINUTES,
+    examples: [
+      `curl -fsS -T sounds/s01.wav "${base}/files?name=sounds/s01.wav"`,
+      `for f in sounds/*.wav; do curl -fsS -T "$f" "${base}/files?name=$f"; done`,
+      `cd stimuli && zip -qr ../stimuli.zip . && curl -fsS -T ../stimuli.zip "${base}/zip"`,
+      `curl -fsS -T sounds.zip "${base}/zip?prefix=sounds"`,
+    ],
+    note:
+      'PUT the raw bytes (curl -T) from your own sandbox; nothing passes through the chat. file_url takes the stimulus name ' +
+      '(URL-encode spaces); zip_url unpacks a zip into stimuli named by their paths inside it (optional ?prefix=folder), ' +
+      `checking every name before storing any. Up to ${MAX_FILE_BYTES / 1024 / 1024} MB per file. Each response is JSON. ` +
+      'Keep these URLs to yourself: anyone with them can upload to this study until they expire. ' +
+      'If your sandbox cannot reach this host, use create_upload_link and have the researcher drag the files in instead.',
   };
 }
 

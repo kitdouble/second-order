@@ -1,7 +1,11 @@
-// The upload page's API (main origin). The upload link's token is the credential: it names one study
-// and expires after an hour.
+// The upload page's API (main origin), also used directly by assistants with create_upload_url. The token is
+// the credential: it names one study and expires after an hour.
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Router } from 'express';
-import { addFromStream, listStimuli, MAX_FILE_BYTES, openUploadLink } from './stimuli.js';
+import { extract } from './exports.js';
+import { addFromDir, addFromStream, listStimuli, MAX_FILE_BYTES, openUploadLink } from './stimuli.js';
 import { findStudy, StudyError } from './studies.js';
 
 export const uploads = Router();
@@ -24,5 +28,22 @@ uploads.put('/:token/files', async (req, res) => {
   } catch (err) {
     if (err instanceof StudyError) return res.status(400).json({ error: err.message });
     throw err;
+  }
+});
+
+// PUT /api/uploads/:token/zip?prefix=sounds with a zip as the body: every file in it becomes a stimulus.
+uploads.put('/:token/zip', async (req, res) => {
+  const link = openUploadLink(req.params.token);
+  if (!link) return expired(res);
+  const dir = mkdtempSync(join(tmpdir(), 'so-stimuli-'));
+  try {
+    const study = findStudy(link.user, link.study.id, 'edit');
+    const paths = await extract(req, dir);
+    res.json(await addFromDir(study, link.user, dir, paths, req.query.prefix));
+  } catch (err) {
+    if (err instanceof StudyError) return res.status(400).json({ error: err.message });
+    throw err;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

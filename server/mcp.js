@@ -10,7 +10,7 @@ import { closeLink, createLink, createStudy, describeStudy, exportData, listMemb
 import { collectGarbage, copyStudy, deleteSavedVersion, restoreVersion, saveVersion, storageReport, updateExperiment } from './live.js';
 import { CompileError } from './compile.js';
 import { authoringGuide } from './guide.js';
-import { addStimulus, copyStimuli, createUploadLink, importFromUrl, listStimuli, removeStimulus } from './stimuli.js';
+import { addStimulus, copyStimuli, createUploadLink, createUploadUrl, importFromUrl, listStimuli, removeStimulus } from './stimuli.js';
 import { simulate } from './simulate.js';
 import { checkLaunch, studyStatus } from './monitor.js';
 import { qualityReport, setExclusionRules } from './quality.js';
@@ -790,9 +790,20 @@ export function buildServer() {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, handled(async ({ study_id }, extra) => text(createUploadLink(userOf(extra), study_id))));
 
+  server.registerTool('create_upload_url', {
+    title: 'Create upload URL (for files you made)',
+    description:
+      'Upload URLs (valid 1 hour) you can PUT stimulus files to directly from your own sandbox with curl, one file at a ' +
+      'time or a whole folder as one zip, so the bytes never pass through the chat. Use for files you generated or ' +
+      'downloaded in your workspace that are too big or too many for add_stimulus. Needs a sandbox that can make https ' +
+      'requests to this server; otherwise use create_upload_link. New files are live straight away.',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id }, extra) => text(createUploadUrl(userOf(extra), study_id))));
+
   server.registerTool('add_stimulus', {
     title: 'Add stimulus',
-    description: 'Add a small file you generated (e.g. an SVG, a CSV of trial items) as a stimulus. Up to about 5 MB. Replaces a file with the same name.',
+    description: 'Add a small file you generated (e.g. an SVG, a CSV of trial items) as a stimulus. Up to about 5 MB. Replaces a file with the same name. For binary files or more than a couple of files, use create_upload_url and curl instead.',
     inputSchema: {
       study_id: z.string(),
       name: z.string().describe('File name, optionally in folders, e.g. "shapes/circle.svg"'),

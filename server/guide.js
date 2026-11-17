@@ -160,7 +160,8 @@ return [consent({ minutes: 10 }), demographics(), ...baseline, esmCode({ study: 
 ## Stimuli
 
 Images, audio, video and CSV/JSON/text files are uploaded to the study (create_upload_link for files the
-researcher has, add_stimulus for small files you generate, import_stimulus_from_url for public files) and
+researcher has, add_stimulus for a small text file you generate, create_upload_url to curl files or a zip from
+your own sandbox, import_stimulus_from_url for public files) and
 referred to by name:
 
 \`\`\`js

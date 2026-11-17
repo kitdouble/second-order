@@ -599,7 +599,8 @@ function entryPath(name) {
 }
 
 // Unzips a stream into dir, streaming (the zip is never held in memory). Returns the relative paths.
-async function extract(stream, dir) {
+// Also used for zips of stimuli uploaded with create_upload_url.
+export async function extract(stream, dir) {
   const unzip = new Unzip();
   unzip.register(UnzipInflate);
   const paths = [];
@@ -626,7 +627,7 @@ async function extract(stream, dir) {
         }
         written += chunk.length;
         if (written > MAX_UNZIPPED_BYTES) {
-          error = new StudyError('The unzipped export is too large to import.', { platform: true });
+          error = new StudyError('The unzipped files are too large.', { platform: true });
           return;
         }
         writeSync(fd, chunk);
