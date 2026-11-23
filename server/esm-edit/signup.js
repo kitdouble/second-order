@@ -3,6 +3,7 @@
 import '../panel/panel.css';
 import './page.css';
 import { copy, el, status_ } from '../panel/ui.js';
+import { reportFooter } from './report.js';
 
 const root = document.getElementById('root');
 const dark = window.matchMedia('(prefers-color-scheme: dark)');
@@ -11,12 +12,13 @@ theme();
 dark.addEventListener('change', theme);
 document.title = 'Set up a Qualtrics ESM study';
 
+const show = (...content) => root.replaceChildren(header(), ...content, el('div', { class: 'page' }, reportFooter('/api/esm-report')));
 const header = () => el('div', { class: 'bar' }, el('span', { class: 'brand' }, 'Second Order'), el('span', { class: 'title' }, 'Qualtrics ESM study'));
 const field = (label, input, hint) => el('label', { class: 'field' }, el('span', {}, label), input, hint ? el('small', {}, hint) : null);
 
 function done({ owner_url }) {
   const input = el('input', { class: 'url', readonly: true, value: owner_url, onclick: (e) => e.target.select() });
-  root.replaceChildren(header(), el('div', { class: 'page pad' },
+  show(el('div', { class: 'page pad' },
     el('h3', {}, 'Your study is set up'),
     el('p', {}, status_('good', 'Ready'), ' This is your private link to the study. ', el('strong', {}, 'Copy it and bookmark it now: it is shown only once.')),
     el('div', { class: 'copy-row' }, input,
@@ -37,7 +39,7 @@ function done({ owner_url }) {
     open = (await (await fetch('/api/esm-signup', { cache: 'no-store' })).json()).open;
   } catch { /* shown below */ }
   if (!open) {
-    return root.replaceChildren(header(), el('div', { class: 'page pad' }, el('h3', {}, 'Sign-up is closed'),
+    return show(el('div', { class: 'page pad' }, el('h3', {}, 'Sign-up is closed'),
       el('p', {}, 'Setting up new studies is turned off at the moment. Please contact the person who sent you here.')));
   }
 
@@ -75,7 +77,7 @@ function done({ owner_url }) {
     }
   }
 
-  root.replaceChildren(header(), el('div', { class: 'page pad' },
+  show(el('div', { class: 'page pad' },
     el('h3', {}, 'Set up a Qualtrics ESM study'),
     el('p', {}, 'Run an experience sampling study with the free MetaForge phone app (', el('a', { href: 'https://apps.apple.com/au/app/metaforge-live/id6758686932', target: '_blank', rel: 'noopener' }, 'MetaForge Live'), ' on iPhone, MetaForge EMA on Android) and a survey you build in Qualtrics. ' +
       'Participants enter a code in the app and get notifications on your schedule; each notification opens your survey. You need the sign-up key from the person who sent you here.'),

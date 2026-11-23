@@ -6,6 +6,7 @@ import '../panel/panel.css';
 import './page.css';
 import { date, el } from '../panel/ui.js';
 import { mountEsmSettings } from '../panel/esm-form.js';
+import { reportFooter } from './report.js';
 
 const token = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() ?? '');
 const root = document.getElementById('root');
@@ -39,7 +40,9 @@ function header(title) {
 }
 
 function fail(message) {
-  root.replaceChildren(header('ESM settings'), el('div', { class: 'pad page' }, el('h3', {}, 'This link can\'t be used'), el('p', {}, message)));
+  root.replaceChildren(header('ESM settings'), el('div', { class: 'page' },
+    el('div', { class: 'pad' }, el('h3', {}, 'This link can\'t be used'), el('p', {}, message)),
+    reportFooter('/api/esm-report')));
 }
 
 (async () => {
@@ -65,7 +68,8 @@ function fail(message) {
               `${state.shared_by} shared this page so you can change the ESM settings of "${state.study.title}" and make enrolment codes. `,
               'Saved changes are live for participants at once. ',
               `This link works until ${date(state.expires)}; keep it to yourself.`)),
-      form));
+      form,
+      reportFooter(`/api/esm-edit/${encodeURIComponent(token)}/report`)));
   mountEsmSettings(form, {
     settings: state.settings,
     editable: true,

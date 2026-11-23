@@ -1,6 +1,6 @@
 // Notes the assistants (Claude, ChatGPT) leave about the platform itself: bugs, limitations, missing
 // tools, unclear docs. Admins read them with list_feedback and close them with resolve_feedback.
-import { db, newId, now } from './db.js';
+import { db, newId, now, SELF_SERVICE_USER } from './db.js';
 import { findStudy } from './studies.js';
 
 db.exec(`
@@ -21,6 +21,9 @@ db.exec(`
   );
 `);
 
+// Reports from the self-service ESM pages: an email to reply to, if the person gave one.
+if (!db.prepare('PRAGMA table_info(feedback)').all().some((c) => c.name === 'contact')) db.exec('ALTER TABLE feedback ADD COLUMN contact TEXT');
+
 const SHORT = 8; // ids are shown and accepted as their first 8 characters
 
 export function leaveFeedback(user, { study_id, kind, tool, client, summary, details }) {
@@ -35,7 +38,7 @@ export function leaveFeedback(user, { study_id, kind, tool, client, summary, det
 
 export function listFeedback({ status = 'open', limit = 50 } = {}) {
   const rows = db.prepare(
-    `SELECT f.id, f.kind, f.tool, f.client, f.summary, f.details, f.status, f.resolution, f.study_id,
+    `SELECT f.id, f.kind, f.tool, f.client, f.summary, f.details, f.contact, f.status, f.resolution, f.study_id,
             s.title AS study_title, u.name AS from_user,
             datetime(f.created_at / 1000, 'unixepoch') AS created,
             datetime(f.resolved_at / 1000, 'unixepoch') AS resolved
@@ -48,7 +51,7 @@ export function listFeedback({ status = 'open', limit = 50 } = {}) {
   const counts = Object.fromEntries(
     db.prepare('SELECT status, COUNT(*) AS n FROM feedback GROUP BY status').all().map((r) => [r.status, r.n])
   );
-  return { counts, notes: rows.map((r) => ({ ...r, id: r.id.slice(0, SHORT) })) };
+  return { counts, notes: rows.map(({ contact, ...r }) => ({ ...r, ...(contact && { reply_to: contact }), id: r.id.slice(0, SHORT) })) };
 }
 
 export function resolveFeedback(user, { ids, status = 'resolved', resolution }) {
@@ -63,4 +66,24 @@ export function resolveFeedback(user, { ids, status = 'resolved', resolution }) 
     return { id, status };
   });
   return { results };
+}
+
+// Secrets people may paste when describing a problem: owner and edit links, and the keys in Web Service URLs.
+const scrub = (text) => String(text ?? '')
+  .replace(/(\/esm-edit\/)[A-Za-z0-9_-]{16,}/g, '$1[private link removed]')
+  .replace(/([?&]key=)[A-Za-z0-9_-]{16,}/g, '$1[removed]');
+
+/**
+ * "Report a problem" on the self-service ESM pages (no account). Saved as feedback from the built-in
+ * self-service account, with the page it came from and, from an owner or edit link, the study.
+ */
+export function reportFromPage({ studyId = null, page, summary, details, contact, userAgent }) {
+  const id = newId();
+  const browser = String(userAgent ?? '').slice(0, 160);
+  db.prepare(
+    `INSERT INTO feedback (id, user_id, study_id, kind, tool, client, summary, details, contact, created_at)
+     VALUES (?, ?, ?, 'bug', NULL, ?, ?, ?, ?, ?)`
+  ).run(id, SELF_SERVICE_USER, studyId, `ESM web page: ${page}`, scrub(summary).trim(),
+    [scrub(details).trim(), browser && `Browser: ${browser}`].filter(Boolean).join('\n\n') || null, contact?.trim() || null, now());
+  return { id: id.slice(0, SHORT), saved: 'Thanks: the Second Order maintainers will read this.' };
 }

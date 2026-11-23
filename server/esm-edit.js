@@ -18,6 +18,7 @@ import {
   noteEditLinkUse, scheduleInput, setSchedule, signupOpen,
 } from './esm.js';
 import { StudyError } from './studies.js';
+import { reportFromPage } from './feedback.js';
 import { config } from './config.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -59,8 +60,8 @@ const editPage = await page('server/esm-edit/page.js');
 const signupPage = await page('server/esm-edit/signup.js');
 
 // Per-address limits: unknown link secrets and wrong sign-up keys (guessing), and studies set up.
-const limits = { misses: new Map(), badKeys: new Map(), signups: new Map() };
-setInterval(() => { limits.misses.clear(); limits.badKeys.clear(); }, 60 * 60 * 1000).unref();
+const limits = { misses: new Map(), badKeys: new Map(), signups: new Map(), reports: new Map() };
+setInterval(() => { limits.misses.clear(); limits.badKeys.clear(); limits.reports.clear(); }, 60 * 60 * 1000).unref();
 setInterval(() => limits.signups.clear(), 24 * 60 * 60 * 1000).unref();
 const over = (map, ip, max) => (map.get(ip) ?? 0) >= max;
 const bump = (map, ip) => map.set(ip, (map.get(ip) ?? 0) + 1);
@@ -80,6 +81,26 @@ const signupInput = z.object({
   survey_url: z.string().trim().min(1).max(500),
   agree: z.literal(true),
 }).strict();
+
+const reportInput = z.object({
+  summary: z.string().trim().min(1).max(200),
+  details: z.string().max(4000).optional(),
+  contact: z.union([z.string().trim().email().max(200), z.literal('')]).optional(),
+}).strict();
+
+// Report a problem: at most 5 an hour from one address.
+function report(req, res, next, { studyId = null, page }) {
+  res.set('Cache-Control', 'no-store');
+  if (over(limits.reports, req.ip, 5)) return res.status(429).json({ error: 'Too many reports from here in the last hour. Please try again later.' });
+  try {
+    const input = parsed(reportInput, req.body);
+    bump(limits.reports, req.ip);
+    res.json(reportFromPage({ ...input, studyId, page, userAgent: req.get('user-agent') }));
+  } catch (err) {
+    if (err instanceof StudyError) return res.status(400).json({ error: err.message });
+    next(err);
+  }
+}
 
 const short = (v) => (v == null || v === '' ? 'none' : String(v).length > 40 ? `${String(v).slice(0, 40)}…` : String(v));
 
@@ -111,6 +132,8 @@ esmEdit.get('/esm/new', (req, res) => (config.esmOrigin && req.get('host') !== n
 /* ---------- Self-service sign-up ---------- */
 
 esmEdit.get('/api/esm-signup', (_req, res) => res.set('Cache-Control', 'no-store').json({ open: signupOpen() }));
+
+esmEdit.post('/api/esm-report', (req, res, next) => report(req, res, next, { page: 'sign-up page (no study)' }));
 
 esmEdit.post('/api/esm-signup', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
@@ -180,6 +203,9 @@ esmEdit.post('/api/esm-edit/:token/codes', handle((req) => {
   noteEditLinkUse(link.id, `made ${result.codes.length} ${args.test ? 'test ' : ''}code${result.codes.length === 1 ? '' : 's'}${args.label ? ` (${short(args.label)})` : ''}`);
   return { result, settings: esmSettings(user, study.id, { viaLink: true }) };
 }));
+
+esmEdit.post('/api/esm-edit/:token/report', (req, res, next) =>
+  report(req, res, next, { studyId: req.esmEdit.study.id, page: req.esmEdit.link.kind === 'owner' ? 'owner link' : `edit link (${req.esmEdit.link.label})` }));
 
 esmEdit.get('/api/esm-edit/:token/intake', handle((req) => {
   const { link, user, study } = req.esmEdit;

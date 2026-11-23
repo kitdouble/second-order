@@ -974,7 +974,7 @@ export function buildServer() {
 
   server.registerTool('list_feedback', {
     title: 'List feedback',
-    description: 'Admin only. Notes assistants have left with leave_feedback, newest first, for deciding what to fix next.',
+    description: 'Admin only. Notes assistants have left with leave_feedback, and problems reported from the self-service ESM pages (client "ESM web page: …", with reply_to when the person gave an email), newest first, for deciding what to fix next.',
     inputSchema: {
       status: z.enum(['open', 'resolved', 'wontfix', 'all']).default('open'),
       limit: z.number().int().min(1).max(500).default(50),
