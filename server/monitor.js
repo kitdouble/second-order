@@ -2,6 +2,7 @@
 import { db, now } from './db.js';
 import { config } from './config.js';
 import { describeStudy, findStudy, iso, linkUrl, StudyError } from './studies.js';
+import { statedMinutes } from './stated.js';
 import { simulate } from './simulate.js';
 
 const ACTIVE_WINDOW = 30 * 60 * 1000;
@@ -157,7 +158,12 @@ export async function checkLaunch(user, studyId, { recruitment = 'prolific', com
   }
 
   // Length and pay
-  const stated = Number(v.code.match(/consent\(\s*\{[^}]*minutes\s*:\s*(\d+(?:\.\d+)?)/)?.[1]);
+  const { minutes: stated, expression } = statedMinutes(v.code);
+  if (has('consent_form') && !stated && (recruitment === 'prolific' || recruitment === 'sona')) {
+    add('fail', 'Stated length', expression
+      ? `consent({ minutes: ${expression} }) can't be read from the code, so ${recruitment === 'prolific' ? 'Prolific pay' : 'SONA credit'} and the length check can't use it. Use a number, or a top-level const set to one.`
+      : 'consent() is shown but its minutes can\'t be found in the code. Pass consent({ minutes: <number> }).');
+  }
   // Runs of this code (rebuilds for changed stimuli keep the same code).
   const sameCode = `SELECT r.* FROM runs r JOIN study_versions x ON x.id = r.version_id WHERE x.study_id = ? AND x.code = ?`;
   const timed = db.prepare(`${sameCode} AND r.finished_at IS NOT NULL AND r.stopped IS NULL`).all(study.id, v.code);

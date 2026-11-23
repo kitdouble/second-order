@@ -6,6 +6,7 @@
 // researcher per calendar month; admins are exempt. Every spend is recorded in prolific_spend.
 import { randomBytes } from 'node:crypto';
 import { db, hash, newToken, now } from './db.js';
+import { statedMinutes } from './stated.js';
 import { closeLink, createLink, findStudy, iso, isLabMember, linkUrl, StudyError } from './studies.js';
 import { currentRevision } from './live.js';
 import { checkLaunch } from './monitor.js';
@@ -158,11 +159,6 @@ async function costOf(reward, places) {
 
 /* ---------- Reading the experiment ---------- */
 
-// The length stated in consent({ minutes }), which also sets the pay participants are promised.
-function statedMinutes(code) {
-  return Number(code.match(/consent\(\s*\{[^}]*minutes\s*:\s*(\d+(?:\.\d+)?)/)?.[1]) || null;
-}
-
 // deviceCheck() allows computers unless told otherwise; without it, any device can take part.
 const DEVICE_NAMES = { computer: 'desktop', tablet: 'tablet', phone: 'mobile' };
 function prolificDevices(code) {
@@ -239,10 +235,12 @@ export async function createDraft(user, studyId, { places, label, name, descript
   const study = findStudy(user, studyId, 'edit');
   const v = currentRevision(study.id);
   if (!v) throw new StudyError('Write the experiment (update_experiment) before making a Prolific study.');
-  const minutes = statedMinutes(v.code);
+  const { minutes, expression } = statedMinutes(v.code);
   if (!minutes) {
-    throw new StudyError('The experiment has no consent({ minutes }), so there is no stated length or pay. Add the consent block first: ' +
-      'Prolific pay is set from it at the lab rate.');
+    throw new StudyError(expression
+      ? `consent({ minutes: ${expression} }) isn't a number Second Order can read from the code. Use a number, or a top-level const set to one: Prolific pay is set from it at the lab rate.`
+      : 'The experiment has no consent({ minutes }), so there is no stated length or pay. Add the consent block first: ' +
+        'Prolific pay is set from it at the lab rate.');
   }
   const reward = Math.ceil((minutes / 60) * PROLIFIC_GBP_PER_HOUR * 100 - 1e-9);
   const devices = prolificDevices(v.code);

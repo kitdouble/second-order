@@ -2,6 +2,7 @@
 // checks, response distributions, and the study's exclusion rules applied the same way everywhere.
 import { db } from './db.js';
 import { findStudy, iso, StudyError } from './studies.js';
+import { statedMinutes } from './stated.js';
 import { summarise } from './simulate.js';
 import { studyStatus } from './monitor.js';
 import { PROLIFIC_GBP_PER_HOUR } from './lib/context.js';
@@ -81,7 +82,7 @@ export function qualityReport(user, studyId, { include_test = false } = {}) {
   const completed = sessions.filter((s) => s.quality.status === 'completed');
 
   // Length and pay, against what consent says.
-  const stated = Number(runs.at(-1).code.match(/consent\(\s*\{[^}]*minutes\s*:\s*(\d+(?:\.\d+)?)/)?.[1]) || null;
+  const stated = statedMinutes(runs.at(-1).code).minutes;
   const medianMinutes = median(completed.map((s) => s.quality.minutes));
   const pay = stated && medianMinutes
     ? Math.round(((Math.ceil((stated / 60) * PROLIFIC_GBP_PER_HOUR * 100) / 100) / (medianMinutes / 60)) * 100) / 100
