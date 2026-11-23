@@ -214,7 +214,7 @@ export function mountEsmSettings(container, options) {
       settings.qualtrics_setup?.session_info ? sessionInfoSection(settings.qualtrics_setup.session_info) : null,
       settings.configured && intakeSetup ? intakeSection() : null,
       links && settings.edit_links ? linksSection() : null,
-      settings.self_service ? el('p', { class: 'muted' }, settings.self_service.retention, ` Due: ${date(settings.self_service.deleted_after)}, unless the study is used before then.`) : null,
+      settings.self_service ? el('p', { class: 'muted' }, settings.self_service.retention, ` Due: ${new Date(settings.self_service.deleted_after).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}, unless the study is used before then.`) : null,
       settings.self_service && deleteStudy ? deleteSection() : null));
     resized();
   }
