@@ -478,7 +478,7 @@ export function buildServer() {
     title: 'Set ESM schedule',
     description:
       'Make a study an ESM / EMA (experience sampling) study, or change its schedule. Participants take part through the MetaForge phone ' +
-      'app ("MetaForge Live" on iPhone, "MetaForge EMA" on Android): they enter a code, get notifications on this schedule, and each ' +
+      'app ("MetaForge Live" on iPhone; the Android version is not out yet, so participants need an iPhone for now): they enter a code, get notifications on this schedule, and each ' +
       'notification opens the study\'s live experiment as one short session (keep it to a minute or two, phone-friendly, no consent or ' +
       'device check each time; consent belongs in an intake study). Write that survey with update_experiment first. Only given fields ' +
       'change; the rest keep their current values (MetaForge defaults at first: random, 4 a day, 7 days, 09:00-20:00, 60 min apart, ' +

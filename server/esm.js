@@ -297,7 +297,7 @@ export function createCodes(user, studyId, { count = 1, test = false, label }) {
     note: (test
       ? 'Test codes: their sessions run the preview and are saved as test data. '
       : 'Single-use codes, one per participant. ') +
-      `Participants install "MetaForge Live" on iPhone (${IOS_APP_URL}) or "MetaForge EMA" on Android (Google Play), enter the code, and get prompts on the schedule.`,
+      `Participants install "MetaForge Live" on iPhone (${IOS_APP_URL}; an Android version is coming soon), enter the code, and get prompts on the schedule.`,
   };
 }
 
@@ -345,7 +345,7 @@ export function intakeSetup(user, studyId) {
       test: '1 while testing the intake: test codes run the study as test data and stay out of esm_status',
     },
     suggested_instructions:
-      'The next part of this study happens on your phone, over the coming days. 1. Install the free app: on iPhone, MetaForge Live from the App Store (' + IOS_APP_URL + '); on Android, MetaForge EMA from Google Play. ' +
+      'The next part of this study happens on your phone, over the coming days. 1. Install the free app MetaForge Live from the App Store (' + IOS_APP_URL + '). It is for iPhone; an Android version is coming soon. ' +
       '2. Open it, agree to the terms, and enter this code: ${e://Field/esmCode}. Please write the code down or take a screenshot before you continue. It can be used once, on one phone. ' +
       'Allow notifications when the app asks.',
     note: 'One code per Qualtrics response, so a repeat call returns the same code. Up to ' + MAX_INTAKE_CODES + ' codes can be issued this way. The URL contains a secret: anyone who has it can issue codes.',

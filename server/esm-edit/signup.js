@@ -79,7 +79,7 @@ function done({ owner_url }) {
 
   show(el('div', { class: 'page pad' },
     el('h3', {}, 'Set up a Qualtrics ESM study'),
-    el('p', {}, 'Run an experience sampling study with the free MetaForge phone app (', el('a', { href: 'https://apps.apple.com/au/app/metaforge-live/id6758686932', target: '_blank', rel: 'noopener' }, 'MetaForge Live'), ' on iPhone, MetaForge EMA on Android) and a survey you build in Qualtrics. ' +
+    el('p', {}, 'Run an experience sampling study with the free MetaForge phone app (', el('a', { href: 'https://apps.apple.com/au/app/metaforge-live/id6758686932', target: '_blank', rel: 'noopener' }, 'MetaForge Live'), ' on iPhone; an Android version is coming soon, so for now participants need an iPhone) and a survey you build in Qualtrics. ' +
       'Participants enter a code in the app and get notifications on your schedule; each notification opens your survey. You need the sign-up key from the person who sent you here.'),
     el('form', { class: 'esm-form', novalidate: true, onsubmit: send },
       el('div', { class: 'form-grid' },
