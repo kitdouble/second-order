@@ -518,3 +518,167 @@ table.grid th {
   font-weight: 600;
   color: var(--text-2);
 }
+
+/* ESM settings form */
+.esm-form {
+  margin: 0;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.field > span {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.field small,
+.choice small {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.field input,
+.field select,
+.codes-text {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.field input:focus,
+.field select:focus,
+.codes-text:focus {
+  outline: 2px solid var(--series-1);
+  outline-offset: -1px;
+}
+
+.field input:disabled,
+.field select:disabled {
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+
+.esm-form > .field {
+  margin-top: 10px;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.choice {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.choice:has(input:checked) {
+  border-color: var(--accent);
+}
+
+.choice:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.choice span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.switches {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.check input {
+  margin: 2px 0 0;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 6px;
+}
+
+.form-message {
+  flex: 1;
+  min-width: 200px;
+  color: var(--text-2);
+}
+
+.codes-text {
+  display: block;
+  margin-top: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+}
+
+.new-codes {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.new-codes p {
+  margin: 0;
+}
+
+.copy-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.copy-row .url {
+  flex: 1;
+  margin: 0;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.steps {
+  margin: 8px 0;
+  padding-left: 20px;
+  color: var(--text-2);
+}
+
+.steps li {
+  margin-bottom: 6px;
+}
+
+.tiles + .esm-form {
+  margin-top: 12px;
+}

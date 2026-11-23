@@ -337,6 +337,36 @@ const sessionsCompleted = (studyId, participantId) => (hosted(studyId)
 const hosted = (studyId) => !!db.prepare('SELECT survey_url FROM esm_studies WHERE study_id = ?').get(studyId)?.survey_url;
 const isClosed = (esm) => !!esm.closed_at || !!(esm.link_token && db.prepare('SELECT closed_at FROM links WHERE token = ?').get(esm.link_token)?.closed_at);
 
+/* ---------- The ESM settings panel ---------- */
+
+/**
+ * What the in-chat ESM settings panel shows and edits. For a study without a schedule yet, the defaults it
+ * would start from (configured: false), so the panel can set it up.
+ */
+export function esmSettings(user, studyId) {
+  const study = findStudy(user, studyId);
+  const esm = esmOf(study.id);
+  const closedAt = esm && (esm.closed_at ?? (esm.link_token && db.prepare('SELECT closed_at FROM links WHERE token = ?').get(esm.link_token)?.closed_at));
+  const count = (where) => db.prepare(`SELECT COUNT(*) AS n FROM esm_codes WHERE study_id = ? AND ${where}`).get(study.id).n;
+  const unused = esm
+    ? db.prepare('SELECT code, label, is_test, created_at FROM esm_codes WHERE study_id = ? AND enrolled_at IS NULL AND withdrawn_at IS NULL AND external_ref IS NULL AND source_run_id IS NULL ORDER BY created_at DESC LIMIT 500').all(study.id)
+    : [];
+  return {
+    configured: !!esm,
+    can_edit: ['owner', 'editor'].includes(study.your_role),
+    has_experiment: !!currentRevision(study.id),
+    app_title: esm?.app_title ?? '',
+    survey_url: esm?.survey_url ?? null,
+    closed: closedAt ? iso(closedAt) : null,
+    schedule: describeSchedule(esm?.schedule ?? DEFAULT_SCHEDULE),
+    ...(esm?.survey_url && { qualtrics_setup: qualtricsSetup(esm.callback_key) }),
+    codes: esm
+      ? { issued: count('is_test = 0'), unused: count('is_test = 0 AND enrolled_at IS NULL AND withdrawn_at IS NULL'), enrolled: count('is_test = 0 AND enrolled_at IS NOT NULL'), withdrawn: count('is_test = 0 AND withdrawn_at IS NOT NULL'), test: count('is_test = 1') }
+      : null,
+    unused_codes: unused.map((c) => ({ code: showCode(c.code), label: c.label, ...(c.is_test && { test: true }), created: iso(c.created_at) })),
+  };
+}
+
 /* ---------- Status ---------- */
 
 export function esmStatus(user, studyId, { include_test = false } = {}) {

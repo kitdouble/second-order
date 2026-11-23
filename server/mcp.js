@@ -18,7 +18,7 @@ import { getDocument, listDocuments, saveDocument } from './documents.js';
 import { createDownloadLink, deleteData, deletionLog, summariseData } from './data.js';
 import { leaveFeedback, listFeedback, resolveFeedback } from './feedback.js';
 import { addPlaces, createDraft, demographics, launch, listProlificStudies, prolificStatus, requireProlific, setProlificStatus } from './prolific.js';
-import { createCodes, esmStatus, intakeSetup, setSchedule } from './esm.js';
+import { createCodes, esmSettings, esmStatus, intakeSetup, setSchedule } from './esm.js';
 import { createExportLink, createImportLink } from './exports.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
@@ -54,6 +54,20 @@ function adminOnly(handler) {
       : { ...text('Only Second Order admins can do this.'), isError: true };
 }
 
+// The panel's study for an ESM study: the usual panel state, or a minimal one for a study whose sessions
+// run in Qualtrics and so has no experiment (and no dashboard to try).
+function esmPanel(user, studyId) {
+  let study;
+  try {
+    study = panelState(user, studyId);
+  } catch (err) {
+    if (!(err instanceof StudyError)) throw err;
+    const s = describeStudy(user, studyId);
+    study = { id: s.id, title: s.title, revision: null, participant_links: s.participant_links, saved_versions: s.saved_versions, stimuli: [], status: null };
+  }
+  return { study, esm_settings: esmSettings(user, studyId) };
+}
+
 export function buildServer() {
   const server = new McpServer(
     { name: 'second-order', title: 'Second Order', version: '0.1.0' },
@@ -69,7 +83,7 @@ export function buildServer() {
         'or replication that mostly reuses a design) is a separate study: make it with copy_study, not by editing the original. Workflow: get_authoring_guide, create_study, ' +
         'update_experiment, simulate, show_dashboard, check_launch, ' +
         'create_participant_link (or for Prolific create_prolific_draft then launch_prolific_study), study_status, quality_report, get_data (or summarise_data for large data sets). ' +
-        'ESM / EMA (experience sampling through the MetaForge phone app): set_esm_schedule, create_esm_codes or the esmCode block, esm_status. ' +
+        'ESM / EMA (experience sampling through the MetaForge phone app): set_esm_schedule, create_esm_codes or the esmCode block, esm_status; show_esm_dashboard lets the researcher edit the settings and make codes themselves. ' +
         'Never claim a study is collecting data unless get_study shows an open participant link with participants. ' +
         'Second Order is new: when a tool fails, behaves unexpectedly, is missing something you needed, or its description or the ' +
         'guide misled you, call leave_feedback with a short note for the maintainers (no participant data). Do this without asking, ' +
@@ -377,9 +391,10 @@ export function buildServer() {
     _meta: panelToolMeta,
   }, handled(async ({ study_id }, extra) => {
     const study = panelState(userOf(extra), study_id);
+    const esm = esmSettings(userOf(extra), study_id);
     return {
       content: [{ type: 'text', text: `Dashboard for ${study.title} (live, revision ${study.revision}): ${study.dashboard_url}\nFull participant preview (saves test data): ${study.preview_url}` }],
-      structuredContent: { view: 'dashboard', study },
+      structuredContent: { view: 'dashboard', study, ...(esm.configured && { esm_settings: esm }) },
     };
   }));
 
@@ -492,7 +507,10 @@ export function buildServer() {
       participant_initiated: z.boolean().optional().describe('Event-contingent: participants open a survey themselves when the event happens, as well as or instead of prompts'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, handled(async ({ study_id, ...args }, extra) => text(setSchedule(userOf(extra), study_id, args))));
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const result = setSchedule(userOf(extra), study_id, args);
+    return { ...text(result), structuredContent: { result, esm_settings: esmSettings(userOf(extra), study_id) } };
+  }));
 
   server.registerTool('create_esm_codes', {
     title: 'Create ESM codes',
@@ -507,7 +525,31 @@ export function buildServer() {
       label: z.string().max(120).optional().describe('e.g. "Lab pilot", kept with the codes and shown in esm_status'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, handled(async ({ study_id, ...args }, extra) => text(createCodes(userOf(extra), study_id, args))));
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const result = createCodes(userOf(extra), study_id, args);
+    return { ...text(result), structuredContent: { result, esm_settings: esmSettings(userOf(extra), study_id) } };
+  }));
+
+  server.registerTool('show_esm_dashboard', {
+    title: 'Show ESM dashboard',
+    description:
+      'Show the researcher an ESM study\'s settings in the chat where supported, as a form they can edit and save themselves: the app title, ' +
+      'where sessions run (the study\'s own experiment or a Qualtrics survey link), the schedule, and whether the study is open. It also ' +
+      'generates enrolment codes (test or real, with a label) to copy or download, lists unused codes, and in Qualtrics mode shows the Survey Flow ' +
+      'setup. Saving calls set_esm_schedule and create_esm_codes directly, so changes are live at once; you are told what they changed. ' +
+      'Works for a study without a schedule yet too (the form sets it up). Use when the researcher wants to see or change ESM settings or make codes.',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    _meta: panelToolMeta,
+  }, handled(async ({ study_id }, extra) => {
+    const panel = esmPanel(userOf(extra), study_id);
+    const s = panel.esm_settings;
+    const summary = s.configured
+      ? `ESM settings for ${panel.study.title}: ${s.survey_url ? `sessions open the Qualtrics survey ${s.survey_url}` : 'sessions run the live experiment'}; ` +
+        `${s.closed ? `closed ${s.closed}` : 'open'}; ${s.codes.issued} codes issued, ${s.codes.unused} unused, ${s.codes.enrolled} enrolled.`
+      : `${panel.study.title} has no ESM schedule yet; the panel offers a form to set one up.`;
+    return { ...text(`${summary}\nThe researcher can edit the settings and make codes in the panel; ask for them in the chat if it does not appear.`), structuredContent: { view: 'esm', ...panel } };
+  }));
 
   server.registerTool('esm_intake_setup', {
     title: 'ESM codes from a Qualtrics survey',

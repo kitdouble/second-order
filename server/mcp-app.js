@@ -1,5 +1,5 @@
 // Builds the single-file HTML for the in-chat panel (MCP App) once, at startup. One panel serves
-// show_dashboard and simulate; the tool result says which view to open.
+// show_dashboard, show_esm_dashboard, simulate, check_launch and quality_report; the tool result says which view to open.
 import { build } from 'esbuild';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,7 +34,8 @@ export const panelHtml = `<!doctype html>
 <nav class="tabs">
   <button type="button" data-tab="try" class="active">Try it</button>
   <button type="button" data-tab="study">Study</button>
-  <button type="button" data-tab="esm" id="tab-esm" hidden>ESM<span class="count"></span></button>
+  <button type="button" data-tab="esmset" id="tab-esmset" hidden>ESM settings</button>
+  <button type="button" data-tab="esm" id="tab-esm" hidden>ESM sessions<span class="count"></span></button>
   <button type="button" data-tab="sim" id="tab-sim" hidden>Simulation<span class="count"></span></button>
   <button type="button" data-tab="check" id="tab-check" hidden>Launch check</button>
   <button type="button" data-tab="quality" id="tab-quality" hidden>Quality</button>
@@ -53,6 +54,7 @@ export const panelHtml = `<!doctype html>
   </div>
 </section>
 <section class="view" id="view-study"></section>
+<section class="view" id="view-esmset"></section>
 <section class="view" id="view-esm"></section>
 <section class="view" id="view-sim"></section>
 <section class="view" id="view-check"></section>
