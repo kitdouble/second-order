@@ -18,7 +18,7 @@ import { getDocument, listDocuments, saveDocument } from './documents.js';
 import { createDownloadLink, deleteData, deletionLog, summariseData } from './data.js';
 import { leaveFeedback, listFeedback, resolveFeedback } from './feedback.js';
 import { addPlaces, createDraft, demographics, launch, listProlificStudies, prolificStatus, requireProlific, setProlificStatus } from './prolific.js';
-import { createCodes, createEditLink, esmSettings, esmStatus, intakeSetup, revokeEditLink, scheduleInput, setSchedule } from './esm.js';
+import { createCodes, createEditLink, deleteSelfService, esmSettings, esmStatus, intakeSetup, listSelfService, reissueOwnerLink, revokeEditLink, scheduleInput, setSchedule, setSignupKey } from './esm.js';
 import { createExportLink, createImportLink } from './exports.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
@@ -572,7 +572,10 @@ export function buildServer() {
       '(For an intake study built in Second Order, use the esmCode block instead.)',
     inputSchema: { study_id: z.string().describe('The ESM study (the one with the schedule), not the intake survey') },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, handled(async ({ study_id }, extra) => text(intakeSetup(userOf(extra), study_id))));
+  }, handled(async ({ study_id }, extra) => {
+    const result = intakeSetup(userOf(extra), study_id);
+    return { ...text(result), structuredContent: { result } };
+  }));
 
   server.registerTool('esm_status', {
     title: 'ESM status',
@@ -585,7 +588,42 @@ export function buildServer() {
       include_test: z.boolean().default(false).describe('Include test-code enrolments'),
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
-  }, handled(async ({ study_id, ...args }, extra) => text(esmStatus(userOf(extra), study_id, args))));
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const result = esmStatus(userOf(extra), study_id, args);
+    return { ...text(result), structuredContent: { result } };
+  }));
+
+  /* ---------- Self-service ESM (Qualtrics-only, no account) ---------- */
+
+  server.registerTool('set_esm_signup_key', {
+    title: 'Set self-service ESM sign-up key',
+    description:
+      'Admin only. Researchers without an account can set up a Qualtrics-only ESM study at the self-service page (/esm/new) with this key, then ' +
+      'manage it (settings, codes, intake survey, participants) through a private owner link. Sets a new key (the old one stops working; existing ' +
+      'studies are unaffected), generating one if key is omitted, or turns sign-up off with key: null. Only a hash is kept: give the admin the key it returns.',
+    inputSchema: { key: z.string().min(8).max(100).nullable().optional().describe('The key to share (at least 8 characters); omit to generate one, null to turn sign-up off') },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, adminOnly(handled(async ({ key }) => text(setSignupKey(key)))));
+
+  server.registerTool('list_self_service_esm', {
+    title: 'List self-service ESM studies',
+    description: 'Admin only. Every self-service ESM study: contact, survey link, codes, enrolments, completed sessions, last activity and when it will be deleted (12 months after its last activity).',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, adminOnly(handled(async () => text(listSelfService()))));
+
+  server.registerTool('reissue_esm_owner_link', {
+    title: 'Re-issue self-service owner link',
+    description: 'Admin only. A new owner link for a self-service ESM study whose owner lost theirs; the old link stops working. Check the request comes from the listed contact before sending it.',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, adminOnly(handled(async ({ study_id }) => text(reissueOwnerLink(study_id)))));
+
+  server.registerTool('delete_self_service_esm', {
+    title: 'Delete self-service ESM study',
+    description: 'Admin only. Delete a self-service ESM study and everything held for it (settings, codes, enrolments, session counts); the app stops working for its participants. Only when the admin asks. Qualtrics responses are not affected.',
+    inputSchema: { study_id: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, adminOnly(handled(async ({ study_id }) => text(deleteSelfService(study_id)))));
 
   /* ---------- Prolific ---------- */
 

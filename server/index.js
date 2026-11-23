@@ -13,6 +13,7 @@ import { downloads } from './data.js';
 import { imports } from './exports.js';
 import { esmEdit } from './esm-edit.js';
 import { collectGarbage } from './live.js';
+import { pruneSelfService } from './esm.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -66,6 +67,8 @@ app.use((err, _req, res, _next) => {
 const housekeeping = () => {
   pruneExpired();
   const freed = collectGarbage();
+  const expired = pruneSelfService();
+  if (expired) console.log(`Deleted ${expired} self-service ESM stud${expired === 1 ? 'y' : 'ies'} 12 months past their last activity`);
   if (freed.files_deleted) console.log(`Removed ${freed.files_deleted} unused stimulus file(s), ${freed.mb_freed} MB`);
 };
 housekeeping();

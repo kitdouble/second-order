@@ -50,13 +50,16 @@ function message(kind, text, verdict) {
  *   download(filename, mimeType, text) -> Promise                  optional: else only Copy all
  *   refresh()                -> settings                           optional
  *   links                    optional, panel only: { create({ label, days }) -> { url, settings }, revoke(id) -> settings }
+ *   intakeSetup()            optional -> esm_intake_setup's result (codes from a Qualtrics intake survey)
+ *   status()                 optional -> esm_status's result (participants and sessions)
+ *   deleteStudy()            optional, self-service owner page only
  *   tell(text)               what the researcher did, for Claude (panel only)
  *   resized()                after the height changes
  * Returns { update(settings) } for new settings from elsewhere; the same object again is ignored, so
  * unsaved edits survive unrelated updates.
  */
 export function mountEsmSettings(container, options) {
-  const { editable, notEditable, save, makeCodes, download, refresh, links, tell = () => {}, resized = () => {} } = options;
+  const { editable, notEditable, save, makeCodes, download, refresh, links, intakeSetup, status, deleteStudy, tell = () => {}, resized = () => {} } = options;
   let settings = null;
   let newCodes = null; // the batch just made, shown until the study changes
   let newLink = null; // a link just made: its URL is shown once
@@ -110,10 +113,12 @@ export function mountEsmSettings(container, options) {
     const form = el('form', { class: 'esm-form', novalidate: true, onsubmit: (e) => { e.preventDefault(); submit(); } },
       el('div', { class: 'form-grid' },
         field('Study name in the app', title, 'What participants see; the study title stays researcher-facing.')),
-      el('h3', {}, 'Where each prompt opens'),
-      el('div', { class: 'choices' },
-        modeRadio('experiment', 'This study\'s experiment', settings.has_experiment ? 'Runs the live Second Order experiment.' : 'The study has no experiment yet.', !settings.has_experiment),
-        modeRadio('qualtrics', 'A Qualtrics survey', 'Opens your survey; responses stay in Qualtrics.', false)),
+      settings.self_service
+        ? el('div', { hidden: true }, modeRadio('qualtrics', '', '', false))
+        : [el('h3', {}, 'Where each prompt opens'),
+            el('div', { class: 'choices' },
+              modeRadio('experiment', 'This study\'s experiment', settings.has_experiment ? 'Runs the live Second Order experiment.' : 'The study has no experiment yet.', !settings.has_experiment),
+              modeRadio('qualtrics', 'A Qualtrics survey', 'Opens your survey; responses stay in Qualtrics.', false))],
       surveyField,
       el('h3', {}, 'Schedule'),
       el('div', { class: 'form-grid' },
@@ -202,9 +207,15 @@ export function mountEsmSettings(container, options) {
         : null,
       !editable && notEditable ? el('p', { class: 'note' }, notEditable) : null,
       form,
+      settings.configured && status ? statusSection() : null,
       settings.configured ? codesSection() : null,
+      settings.configured ? el('h3', {}, 'Qualtrics instructions') : null,
       settings.qualtrics_setup ? qualtricsSection(settings.qualtrics_setup) : null,
-      links && settings.edit_links ? linksSection() : null));
+      settings.qualtrics_setup?.session_info ? sessionInfoSection(settings.qualtrics_setup.session_info) : null,
+      settings.configured && intakeSetup ? intakeSection() : null,
+      links && settings.edit_links ? linksSection() : null,
+      settings.self_service ? el('p', { class: 'muted' }, settings.self_service.retention, ` Due: ${date(settings.self_service.deleted_after)}, unless the study is used before then.`) : null,
+      settings.self_service && deleteStudy ? deleteSection() : null));
     resized();
   }
 
@@ -267,7 +278,7 @@ export function mountEsmSettings(container, options) {
 
   function qualtricsSection(setup) {
     return el('details', { class: 'technical' },
-      el('summary', {}, 'Qualtrics setup (Survey Flow)'),
+      el('summary', {}, 'Set up the survey for the app (required)'),
       el('ol', { class: 'steps' }, setup.steps.map((s) => el('li', {}, s))),
       el('h3', {}, 'Web Service URL'),
       copyRow(setup.web_service_url),
@@ -277,6 +288,124 @@ export function mountEsmSettings(container, options) {
       el('pre', {}, setup.last_page_javascript),
       el('button', { class: 'btn', type: 'button', onclick: async (e) => { e.target.textContent = (await copy(setup.last_page_javascript)) ? 'Copied' : 'Select it above'; } }, 'Copy JavaScript'),
       el('p', { class: 'muted' }, setup.note));
+  }
+
+
+  const paramTable = (params) => el('table', { class: 'grid' }, el('tbody', {}, Object.entries(params).map(([k, v]) => el('tr', {}, el('td', { class: 'mono' }, k), el('td', { class: 'mono' }, v)))));
+
+  // Branch logic on session counts: a Web Service step at the start of the survey, then Branch elements.
+  function sessionInfoSection(info) {
+    return el('details', { class: 'technical' },
+      el('summary', {}, 'Show blocks only in some sessions (optional)'),
+      el('p', {}, info.purpose),
+      el('ol', { class: 'steps' }, info.steps.map((s) => el('li', {}, s))),
+      el('h3', {}, 'Web Service URL'),
+      copyRow(info.web_service_url),
+      el('h3', {}, 'Query parameters'),
+      paramTable(info.web_service_query_parameters),
+      el('h3', {}, 'Values you can map to embedded data'),
+      paramTable(info.fields),
+      el('h3', {}, 'Branch conditions'),
+      el('table', { class: 'grid' },
+        el('thead', {}, el('tr', {}, el('th', {}, 'To show a block'), el('th', {}, 'Branch: If Embedded Data…'))),
+        el('tbody', {}, info.branch_examples.map((b) => el('tr', {}, el('td', {}, b.show), el('td', { class: 'mono' }, b.condition))))),
+      el('p', { class: 'muted' }, info.note));
+  }
+
+  // Codes from a Qualtrics intake survey: fetched on demand, since it creates the study's intake secret.
+  function intakeSection() {
+    const box = el('div', {});
+    const load = el('button', { class: 'btn', type: 'button' }, 'Show the intake survey setup');
+    load.addEventListener('click', async () => {
+      load.disabled = true;
+      try {
+        const setup = await intakeSetup();
+        load.hidden = true;
+        box.replaceChildren(
+          el('ol', { class: 'steps' }, setup.steps.map((s) => el('li', {}, s))),
+          el('h3', {}, 'Web Service URL'),
+          copyRow(setup.web_service_url),
+          el('h3', {}, 'Query parameters'),
+          paramTable(setup.web_service_query_parameters),
+          el('h3', {}, 'Optional parameters'),
+          paramTable(setup.optional_query_parameters),
+          el('h3', {}, 'Suggested text for the participant'),
+          el('pre', { class: 'wrap' }, setup.suggested_instructions),
+          el('button', { class: 'btn', type: 'button', onclick: async (e) => { e.target.textContent = (await copy(setup.suggested_instructions)) ? 'Copied' : 'Select it above'; } }, 'Copy text'),
+          el('p', { class: 'muted' }, setup.note));
+        resized();
+      } catch (err) {
+        load.disabled = false;
+        box.replaceChildren(el('p', {}, ...message('critical', err.message, 'Failed')));
+      }
+    });
+    return el('details', { class: 'technical' },
+      el('summary', {}, 'Give out codes from a Qualtrics intake survey (optional)'),
+      el('p', {}, 'Instead of sending codes yourself, a separate Qualtrics survey (consent, baseline questions) can give each respondent their own code at the end. ' +
+        'Qualtrics asks Second Order for a code with a Web Service step and shows it on the last page.'),
+      box.childNodes.length ? null : el('div', {}, load),
+      box);
+  }
+
+  // Who enrolled and how many surveys each completed.
+  function statusSection() {
+    const box = el('div', {});
+    const show = async (button) => {
+      button.disabled = true;
+      try {
+        const st = await status();
+        const rows = st.participants;
+        const csv = ['participant,code,label,test,platform,enrolled,ends,sessions_completed,compliance,last_session',
+          ...rows.map((p) => [p.participant_id, p.code, p.label ?? p.from_qualtrics_response ?? '', p.test ? 'yes' : '', p.platform ?? '', p.enrolled, p.ends, p.sessions_completed, p.compliance ?? '', p.last_session ?? '']
+            .map((v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v)).join(','))].join('\n') + '\n';
+        box.replaceChildren(
+          rows.length
+            ? el('div', { class: 'scroll' }, el('table', { class: 'grid' },
+                el('thead', {}, el('tr', {}, ['Participant', 'Code', 'Phone', 'Enrolled', 'Surveys', 'Compliance', 'Last survey'].map((h) => el('th', {}, h)))),
+                el('tbody', {}, rows.map((p) => el('tr', {},
+                  el('td', { class: 'mono' }, p.participant_id, p.test ? el('span', { class: 'muted' }, ' · test') : null),
+                  el('td', {}, el('span', { class: 'mono' }, p.code), p.label ? el('small', { class: 'muted', style: 'display:block' }, p.label) : null),
+                  el('td', {}, p.platform ?? '–'),
+                  el('td', {}, date(p.enrolled)),
+                  el('td', {}, String(p.sessions_completed)),
+                  el('td', {}, p.compliance != null ? `${Math.round(p.compliance * 100)}%` : '–'),
+                  el('td', {}, p.last_session ? date(p.last_session) : '–'))))))
+            : el('p', { class: 'muted' }, 'Nobody has enrolled yet.'),
+          el('div', { class: 'chips' },
+            el('button', { class: 'btn', type: 'button', onclick: (e) => show(e.target) }, 'Refresh'),
+            download && rows.length ? el('button', { class: 'btn', type: 'button', onclick: () => download('esm-participants.csv', 'text/csv', csv).catch(() => {}) }, 'Download CSV') : null),
+          el('p', { class: 'muted' }, 'Participant is the ID the app sends to Qualtrics as the participant embedded data, so rows match your responses. ' +
+            'Compliance is completed surveys over prompts sent so far (approximate). Test codes are included and marked.'));
+        resized();
+      } catch (err) {
+        button.disabled = false;
+        box.replaceChildren(el('p', {}, ...message('critical', err.message, 'Failed')));
+      }
+    };
+    const first = el('button', { class: 'btn', type: 'button' }, 'Show participants');
+    first.addEventListener('click', () => show(first));
+    box.append(first);
+    return el('div', {}, el('h3', {}, 'Participants'), box);
+  }
+
+  function deleteSection() {
+    const said = el('div', { class: 'form-message', role: 'status' });
+    const button = el('button', { class: 'btn danger', type: 'button' }, 'Delete this study');
+    button.addEventListener('click', async () => {
+      const typed = window.prompt(`This deletes the study's settings, codes, enrolments and session counts from Second Order, and the app stops working for participants. Responses in Qualtrics are kept.\n\nType the study's app name (${settings.app_title}) to confirm.`);
+      if (typed == null) return;
+      if (typed.trim() !== settings.app_title) return said.replaceChildren(...message('critical', 'The name didn\'t match; nothing was deleted.', 'Not deleted'));
+      button.disabled = true;
+      try {
+        await deleteStudy();
+        container.replaceChildren(el('div', { class: 'pad' }, el('h3', {}, 'Deleted'), el('p', {}, 'The study has been deleted from Second Order. This link no longer works.')));
+        resized();
+      } catch (err) {
+        button.disabled = false;
+        said.replaceChildren(...message('critical', err.message, 'Not deleted'));
+      }
+    });
+    return el('div', {}, el('h3', {}, 'Delete'), el('div', { class: 'form-actions' }, button, said));
   }
 
   // Panel only: secret links that let someone without an account edit these settings and make codes.

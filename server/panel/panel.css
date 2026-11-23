@@ -682,3 +682,12 @@ table.grid th {
 .tiles + .esm-form {
   margin-top: 12px;
 }
+
+pre.wrap {
+  white-space: pre-wrap;
+}
+
+.btn.danger {
+  border-color: var(--critical);
+  color: var(--critical);
+}

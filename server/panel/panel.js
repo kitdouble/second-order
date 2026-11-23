@@ -307,6 +307,8 @@ function renderEsmSettings() {
       },
       revoke: async (id) => keep((await callTool('revoke_esm_edit_link', { study_id: study(), link_id: id })).esm_settings),
     },
+    intakeSetup: async () => (await callTool('esm_intake_setup', { study_id: study() })).result,
+    status: async () => (await callTool('esm_status', { study_id: study(), include_test: true })).result,
     tell: (text) => caps.updateModelContext && request('ui/update-model-context', {
       content: [{ type: 'text', text: `In the ESM settings panel for ${state.study.title} (${state.study.id}), the researcher ${text}` }],
     }).catch(() => {}),

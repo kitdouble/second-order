@@ -151,6 +151,11 @@ return [consent({ minutes: 10 }), demographics(), ...baseline, esmCode({ study: 
   submissions" must be off, and the survey must be re-published after every change (the usual cause of sessions not
   counting; esm_status shows recent completion calls to tell). start_with_survey: true gives a test code an
   immediate survey; otherwise the app only offers one inside a prompt's window. Test with create_esm_codes test: true; end the study with set_esm_schedule closed: true.
+- Blocks shown only in some sessions of a Qualtrics-hosted study (a baseline in the first survey, an end-of-study block, once a
+  day): set_esm_schedule's response includes session_info, a Web Service step at the start of the survey that returns the
+  participant's session, sessions_today, study_day and last_day for Branch elements. The app's own sessionNumber is 1 in the first survey.
+- Researchers without an account can run a Qualtrics-only ESM study themselves at /esm/new with the sign-up key an admin
+  sets (set_esm_signup_key); admins see them with list_self_service_esm. show_esm_dashboard is the in-chat editor.
 - Intake survey built in Qualtrics: esm_intake_setup(ESM study id) returns a Web Service step that issues each
   respondent their own code (one per Qualtrics response), the embedded data field to show it from, and suggested
   instructions. Works for either kind of ESM study. Relay the steps, and have the researcher publish and test it.

@@ -7,11 +7,11 @@
 // parameters as embedded data and tells /esm/done when a session is finished, and the sessions are counted there.
 import express from 'express';
 import { z } from 'zod';
-import { randomBytes, randomInt } from 'node:crypto';
-import { db, hash, newToken, now, DAY } from './db.js';
+import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { db, hash, newToken, now, DAY, SELF_SERVICE_USER } from './db.js';
 import { config } from './config.js';
 import { currentRevision } from './live.js';
-import { findStudy, iso, roleIn, StudyError } from './studies.js';
+import { createStudy, findStudy, iso, roleIn, StudyError } from './studies.js';
 
 /* ---------- Schedules ---------- */
 
@@ -122,11 +122,15 @@ export function setSchedule(user, studyId, { app_title, survey_url, closed, ...f
       let url;
       try { url = new URL(survey_url); } catch { throw new StudyError('survey_url must be the survey\'s full https link.'); }
       if (url.protocol !== 'https:') throw new StudyError('survey_url must be an https link (the apps refuse plain http).');
+      if (selfService(study.id) && !isQualtricsForm(url)) {
+        throw new StudyError('Use the survey\'s anonymous link from Qualtrics, like https://yourschool.qualtrics.com/jfe/form/SV_…');
+      }
       if (!url.hostname.endsWith('qualtrics.com')) surveyWarnings.push(`${url.hostname} isn't a qualtrics.com address; fine for a custom Qualtrics domain, but check the link opens the survey.`);
       url.search = ''; url.hash = '';
       surveyUrl = url.toString();
     }
   }
+  if (!surveyUrl && selfService(study.id)) throw new StudyError('A self-service study needs its Qualtrics survey link.');
   if (!surveyUrl && !revision) throw new StudyError('Write the momentary survey first (update_experiment), or give survey_url to use a survey hosted in Qualtrics; the ESM schedule needs one or the other.');
 
   const schedule = { ...DEFAULT_SCHEDULE, ...existing?.schedule };
@@ -186,6 +190,8 @@ const describeSchedule = (schedule) => Object.fromEntries(Object.entries(schedul
 
 export const completionUrl = (key) => `${config.runOrigin}/esm/done?key=${key}`;
 
+export const sessionInfoUrl = (key) => `${config.runOrigin}/esm/session?key=${key}`;
+
 function qualtricsSetup(key) {
   return {
     steps: [
@@ -212,6 +218,41 @@ function qualtricsSetup(key) {
       "  } catch (e) {}\n" +
       "});",
     note: 'Data stays in Qualtrics: get_data has no rows for this study. esm_status shows enrolment, completed sessions and compliance from the Web Service calls.',
+    session_info: sessionInfoSetup(key),
+  };
+}
+
+// Optional: blocks shown only in some sessions (the first, the last day, once a day). A Web Service step at the
+// start of the survey fetches the participant's counts from the sessions the survey has reported.
+function sessionInfoSetup(key) {
+  return {
+    purpose: 'Show some blocks only in some sessions: a baseline in the first survey, an end-of-study block on the last day, a block once a day.',
+    steps: [
+      'Survey Flow, at the top, after the Embedded Data element: add a Web Service element, method GET, with the URL below and the query parameters listed.',
+      'Press Test next to the URL (it answers with sample values when there is no participant), then under Set Embedded Data add one row per value you need: the LEFT box is the field to fill (e.g. session), the RIGHT box is the key in the reply (session).',
+      'Move each block you want to gate under a Branch element, e.g. "If Embedded Data session Is Equal to 1" for the first survey only. Examples are below.',
+      'Publish the survey, and try it with a test code: the first survey has session 1, and each survey that reaches the completion Web Service step counts.',
+    ],
+    web_service_url: sessionInfoUrl(key),
+    web_service_query_parameters: { participant: '${e://Field/participant}', timezone: '${e://Field/timezone}' },
+    fields: {
+      session: 'This survey\'s number: completed surveys so far + 1 (1 in the first)',
+      sessions_completed: 'Surveys completed before this one',
+      sessions_today: 'Surveys completed earlier today, in the participant\'s time zone',
+      study_day: 'Day of the study, in the participant\'s time zone: 1 is the day they enrolled',
+      study_days: 'How many days their schedule runs',
+      last_day: '1 on the schedule\'s last day (or later), else 0',
+      first_session: '1 in the first survey, else 0',
+    },
+    branch_examples: [
+      { show: 'Only in the first survey', condition: 'session Is Equal to 1' },
+      { show: 'Once a day (the first survey each day)', condition: 'sessions_today Is Equal to 0' },
+      { show: 'On the last day of the study', condition: 'last_day Is Equal to 1' },
+      { show: 'From the second week', condition: 'study_day Is Greater Than or Equal to 8' },
+      { show: 'Every 5th survey', condition: 'session Is Equal to 5, OR session Is Equal to 10, … (one condition per survey)' },
+    ],
+    note: 'Counts come from surveys that reached the completion Web Service step, so a survey abandoned half way does not count. ' +
+      'The app also sends its own sessionNumber (1 in the first survey); it can be used in branches the same way, but this step is exact about completed surveys and days.',
   };
 }
 
@@ -237,6 +278,7 @@ function insertCode({ studyId, isTest, label = null, createdBy = null, sourceRun
 export function createCodes(user, studyId, { count = 1, test = false, label }) {
   const study = findStudy(user, studyId, 'edit');
   if (!esmOf(study.id)) throw new StudyError('This study has no ESM schedule yet: set_esm_schedule first.');
+  checkCodeRoom(study.id, count);
   const codes = [];
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -296,7 +338,7 @@ export function intakeSetup(user, studyId) {
     web_service_url: `${config.runOrigin}/esm/code?key=${key}`,
     web_service_query_parameters: { id: '${e://Field/ResponseID}' },
     optional_query_parameters: {
-      ref: 'Something to find this person again, e.g. ${e://Field/PROLIFIC_PID}; shown in esm_status',
+      ref: 'Something to find this person again, e.g. ${e://Field/PROLIFIC_PID}; shown with their code in the participant list',
       test: '1 while testing the intake: test codes run the study as test data and stay out of esm_status',
     },
     suggested_instructions:
@@ -325,7 +367,7 @@ function issueForIntake(req, res) {
   if (!id) { log('refused: id is empty'); return fail(res, 400, 'id is empty: send the response id (${e://Field/ResponseID}).'); }
   const existing = db.prepare('SELECT * FROM esm_codes WHERE external_ref = ? AND study_id = ?').get(id, esm.study_id);
   if (existing?.withdrawn_at) { log('refused: participant data deleted'); return fail(res, 410, 'This participant\'s data was deleted.'); }
-  if (!existing && issuedByIntake(esm.study_id) >= MAX_INTAKE_CODES) { log('refused: too many codes'); return fail(res, 429, 'Too many codes issued for this study.'); }
+  if (!existing && (issuedByIntake(esm.study_id) >= MAX_INTAKE_CODES || !codeRoom(esm.study_id, 1))) { log('refused: too many codes'); return fail(res, 429, 'Too many codes issued for this study.'); }
   const code = existing?.code ?? insertCode({
     studyId: esm.study_id, isTest, label: ref ? `Qualtrics intake: ${ref}` : 'Qualtrics intake', externalRef: id,
   });
@@ -389,7 +431,8 @@ export function esmSettings(user, studyId, { viaLink = false } = {}) {
       ? { issued: count('is_test = 0'), unused: count('is_test = 0 AND enrolled_at IS NULL AND withdrawn_at IS NULL'), enrolled: count('is_test = 0 AND enrolled_at IS NOT NULL'), withdrawn: count('is_test = 0 AND withdrawn_at IS NOT NULL'), test: count('is_test = 1') }
       : null,
     unused_codes: unused.map((c) => ({ code: showCode(c.code), label: c.label, ...(c.is_test && { test: true }), created: iso(c.created_at) })),
-    ...(!viaLink && canEdit && { edit_links: editLinks(study.id) }),
+    ...(!viaLink && canEdit && !selfService(study.id) && { edit_links: editLinks(study.id) }),
+    ...(selfService(study.id) && { self_service: { deleted_after: iso(deletionDue(study.id)), retention: RETENTION_NOTE } }),
   };
 }
 
@@ -402,7 +445,7 @@ export const editLinkUrl = (token) => `${config.origin}/esm-edit/${token}`;
 export function editLinks(studyId) {
   return db.prepare(
     `SELECT l.*, u.name AS creator FROM esm_edit_links l JOIN users u ON u.id = l.created_by
-     WHERE l.study_id = ? AND l.revoked_at IS NULL AND l.expires_at > ? ORDER BY l.created_at`
+     WHERE l.study_id = ? AND l.kind = 'edit' AND l.revoked_at IS NULL AND l.expires_at > ? ORDER BY l.created_at`
   ).all(studyId, now()).map((l) => ({
     id: l.id, label: l.label, created_by: l.creator, created: iso(l.created_at), expires: iso(l.expires_at),
     last_used: iso(l.last_used_at), ...(l.last_action && { last_action: l.last_action }),
@@ -411,6 +454,7 @@ export function editLinks(studyId) {
 
 export function createEditLink(user, studyId, { label, days = 14 }) {
   const study = findStudy(user, studyId, 'edit');
+  if (selfService(study.id)) throw new StudyError('Self-service studies have no collaborator links: their owner manages them through the owner link.');
   const name = String(label ?? '').trim();
   if (!name) throw new StudyError('Give label: who the link is for, so it can be told apart and revoked.');
   if (editLinks(study.id).length >= MAX_EDIT_LINKS) throw new StudyError(`This study already has ${MAX_EDIT_LINKS} active edit links; revoke some first.`);
@@ -432,7 +476,7 @@ export function createEditLink(user, studyId, { label, days = 14 }) {
 
 export function revokeEditLink(user, studyId, linkId) {
   const study = findStudy(user, studyId, 'edit');
-  const { changes } = db.prepare('UPDATE esm_edit_links SET revoked_at = ? WHERE id = ? AND study_id = ? AND revoked_at IS NULL').run(now(), String(linkId), study.id);
+  const { changes } = db.prepare("UPDATE esm_edit_links SET revoked_at = ? WHERE id = ? AND study_id = ? AND kind = 'edit' AND revoked_at IS NULL").run(now(), String(linkId), study.id);
   if (!changes) throw new StudyError('No active edit link with that id on this study (see edit_links in show_esm_dashboard or esm_status).');
   return { revoked: String(linkId), note: 'The link stopped working at once.' };
 }
@@ -455,6 +499,154 @@ export function editLinkAccess(token) {
 
 export function noteEditLinkUse(linkId, action) {
   db.prepare('UPDATE esm_edit_links SET last_used_at = ?, last_action = ? WHERE id = ?').run(now(), action.slice(0, 300), linkId);
+}
+
+/* ---------- Self-service studies: Qualtrics-only, no account ---------- */
+
+// Anyone with the sign-up key can set up a Qualtrics-only ESM study at /esm/new and manage it through an owner
+// link. No experiment code or files, so nothing they write runs here; what is stored is settings, codes, phone
+// model and OS, and session counts. Kept until 12 months after the study's last activity.
+const MAX_SELF_SERVICE_STUDIES = 300;
+const MAX_SELF_SERVICE_CODES = 2000; // every code a self-service study issues, test codes and intake codes included
+const RETENTION = 365 * DAY;
+const RETENTION_NOTE = 'This study and everything Second Order holds for it (settings, codes, enrolments, session counts) are deleted ' +
+  '12 months after its last activity: a settings change, new codes, an enrolment or a completed survey. Responses in Qualtrics are not affected.';
+const SIGNUP_KEY = 'esm_signup_key_hash';
+
+const selfService = (studyId) => !!db.prepare('SELECT 1 FROM esm_self_service WHERE study_id = ?').get(studyId);
+export const isSelfService = selfService;
+const isQualtricsForm = (url) => (url.hostname === 'qualtrics.com' || url.hostname.endsWith('.qualtrics.com')) && /^\/jfe\/form\/SV_[A-Za-z0-9]+\/?$/.test(url.pathname);
+
+function codeRoom(studyId, n) {
+  if (!selfService(studyId)) return true;
+  return db.prepare('SELECT COUNT(*) AS n FROM esm_codes WHERE study_id = ?').get(studyId).n + n <= MAX_SELF_SERVICE_CODES;
+}
+function checkCodeRoom(studyId, n) {
+  if (!codeRoom(studyId, n)) throw new StudyError(`A self-service study can issue up to ${MAX_SELF_SERVICE_CODES} codes in all; this would go over.`);
+}
+
+function lastActivity(studyId) {
+  const at = (sql) => db.prepare(sql).get(studyId)?.at ?? 0;
+  return Math.max(
+    at('SELECT created_at AS at FROM esm_self_service WHERE study_id = ?'),
+    at('SELECT updated_at AS at FROM esm_studies WHERE study_id = ?'),
+    at('SELECT MAX(MAX(created_at), COALESCE(MAX(enrolled_at), 0)) AS at FROM esm_codes WHERE study_id = ?'),
+    at('SELECT MAX(completed_at) AS at FROM esm_sessions WHERE study_id = ?'),
+    at('SELECT MAX(last_used_at) AS at FROM esm_edit_links WHERE study_id = ?'));
+}
+const deletionDue = (studyId) => lastActivity(studyId) + RETENTION;
+
+/** Set the sign-up key (only its hash is kept), or turn sign-up off with null. */
+export function setSignupKey(key) {
+  if (key === null) {
+    db.prepare('DELETE FROM app_settings WHERE key = ?').run(SIGNUP_KEY);
+    return { signup: 'off', note: 'Nobody can set up a new self-service study until a key is set again. Existing studies and owner links keep working.' };
+  }
+  const value = key ?? randomBytes(9).toString('base64url');
+  db.prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
+    .run(SIGNUP_KEY, hash(value), now());
+  return {
+    signup_url: `${config.origin}/esm/new`,
+    key: value,
+    note: 'Share the page and this key with researchers who want to run a Qualtrics ESM study. Only a hash of the key is kept, so note it now; ' +
+      'setting a new key stops the old one working (existing studies are not affected).',
+  };
+}
+
+const signupKeyHash = () => db.prepare('SELECT value FROM app_settings WHERE key = ?').get(SIGNUP_KEY)?.value;
+export const signupOpen = () => !!signupKeyHash();
+
+function keyMatches(given) {
+  const stored = signupKeyHash();
+  if (!stored || typeof given !== 'string' || !given) return false;
+  const a = Buffer.from(hash(given.trim()));
+  const b = Buffer.from(stored);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function issueOwnerLink(studyId) {
+  db.prepare("UPDATE esm_edit_links SET revoked_at = ? WHERE study_id = ? AND kind = 'owner' AND revoked_at IS NULL").run(now(), studyId);
+  const token = newToken();
+  db.prepare("INSERT INTO esm_edit_links (id, token_hash, study_id, label, created_by, created_at, expires_at, kind) VALUES (?, ?, ?, 'Owner', ?, ?, ?, 'owner')")
+    .run(randomBytes(4).toString('hex'), hash(token), studyId, SELF_SERVICE_USER, now(), now() + 10 * 365 * DAY);
+  return editLinkUrl(token);
+}
+
+/** /esm/new: a new self-service study and its owner link. A wrong key throws a StudyError with badKey set. */
+export function createSelfServiceStudy({ key, name, email, institution, app_title, survey_url }) {
+  if (!signupOpen()) throw new StudyError('Sign-up for self-service studies is closed at the moment.');
+  if (!keyMatches(key)) throw Object.assign(new StudyError('That sign-up key isn\'t right. Check it with the person who gave it to you.'), { badKey: true });
+  if (db.prepare('SELECT COUNT(*) AS n FROM esm_self_service').get().n >= MAX_SELF_SERVICE_STUDIES) {
+    throw new StudyError('Second Order has no room for more self-service studies right now. Please contact the person who gave you the key.');
+  }
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(SELF_SERVICE_USER);
+  const { id } = createStudy(user, { title: `${app_title} (self-service, ${name})`, description: `Self-service Qualtrics ESM study for ${name} <${email}>${institution ? `, ${institution}` : ''}.` });
+  try {
+    db.prepare('INSERT INTO esm_self_service (study_id, contact_name, contact_email, institution, created_at) VALUES (?, ?, ?, ?, ?)').run(id, name, email, institution || null, now());
+    setSchedule(user, id, { app_title, survey_url });
+    return { study_id: id, owner_url: issueOwnerLink(id) };
+  } catch (err) {
+    db.prepare('DELETE FROM studies WHERE id = ?').run(id);
+    throw err;
+  }
+}
+
+function selfServiceStudy(studyId) {
+  const row = db.prepare('SELECT * FROM esm_self_service WHERE study_id = ?').get(String(studyId));
+  if (!row) throw new StudyError(`"${studyId}" is not a self-service ESM study (list_self_service_esm lists them).`);
+  return row;
+}
+
+/** Admin: every self-service study, who it belongs to and how it is going. */
+export function listSelfService() {
+  const rows = db.prepare('SELECT g.*, e.app_title, e.survey_url, e.closed_at FROM esm_self_service g LEFT JOIN esm_studies e ON e.study_id = g.study_id ORDER BY g.created_at DESC').all();
+  const count = (sql, id) => db.prepare(sql).get(id).n;
+  return {
+    signup: signupOpen() ? `open at ${config.origin}/esm/new` : 'closed (no key set)',
+    limits: { studies: `${rows.length} of ${MAX_SELF_SERVICE_STUDIES}`, codes_per_study: MAX_SELF_SERVICE_CODES },
+    studies: rows.map((r) => ({
+      study_id: r.study_id,
+      app_title: r.app_title,
+      contact: { name: r.contact_name, email: r.contact_email, ...(r.institution && { institution: r.institution }) },
+      created: iso(r.created_at),
+      survey_url: r.survey_url,
+      ...(r.closed_at && { closed: iso(r.closed_at) }),
+      codes_issued: count('SELECT COUNT(*) AS n FROM esm_codes WHERE study_id = ? AND is_test = 0', r.study_id),
+      enrolled: count('SELECT COUNT(*) AS n FROM esm_codes WHERE study_id = ? AND is_test = 0 AND enrolled_at IS NOT NULL', r.study_id),
+      sessions_completed: count('SELECT COUNT(*) AS n FROM esm_sessions WHERE study_id = ? AND is_test = 0', r.study_id),
+      last_activity: iso(lastActivity(r.study_id)),
+      deleted_after: iso(deletionDue(r.study_id)),
+    })),
+  };
+}
+
+/** Admin: a new owner link for a self-service study (the old one stops working), e.g. when the owner lost it. */
+export function reissueOwnerLink(studyId) {
+  const row = selfServiceStudy(studyId);
+  return {
+    owner_url: issueOwnerLink(row.study_id),
+    contact: { name: row.contact_name, email: row.contact_email },
+    note: 'The previous owner link no longer works. Send this one to the contact; it is not stored and can\'t be shown again.',
+  };
+}
+
+/** Delete a self-service study and everything held for it (admin, or its owner from the owner page). */
+export function deleteSelfService(studyId) {
+  const row = selfServiceStudy(studyId);
+  db.prepare('DELETE FROM studies WHERE id = ?').run(row.study_id); // settings, codes, sessions, links and the row above go with it
+  return { deleted: row.study_id, note: 'Deleted from Second Order. Responses in Qualtrics are not affected.' };
+}
+
+/** Housekeeping: self-service studies 12 months past their last activity. */
+export function pruneSelfService() {
+  let deleted = 0;
+  for (const { study_id } of db.prepare('SELECT study_id FROM esm_self_service').all()) {
+    if (deletionDue(study_id) <= now()) {
+      db.prepare('DELETE FROM studies WHERE id = ?').run(study_id);
+      deleted++;
+    }
+  }
+  return deleted;
 }
 
 /* ---------- Status ---------- */
@@ -641,6 +833,45 @@ function done(req, res) {
   log(changes ? 'counted' : 'repeat of a session already counted');
   res.json({ success: true });
 }
+// A hosted survey's optional first Web Service step: the participant's counts, for branch logic. Sample values when
+// there is no such participant, so the Test button in Qualtrics has something to map.
+const localDate = (ms, timeZone) => {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms);
+  } catch {
+    return new Date(ms).toISOString().slice(0, 10);
+  }
+};
+const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / DAY);
+
+function sessionInfo(req, res) {
+  const q = { ...req.query, ...(req.body && typeof req.body === 'object' ? req.body : {}) };
+  const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  const key = str(q.key, 100);
+  const esm = key && db.prepare('SELECT * FROM esm_studies WHERE callback_key = ?').get(key);
+  if (!esm) return fail(res, 403, 'Invalid key');
+  const participant = str(q.participant, 100);
+  const code = participant && db.prepare('SELECT * FROM esm_codes WHERE participant_id = ? AND study_id = ? AND withdrawn_at IS NULL').get(participant, esm.study_id);
+  const days = JSON.parse(code?.schedule ?? esm.schedule).studyDuration;
+  if (!code) {
+    return res.json({ session: 1, sessions_completed: 0, sessions_today: 0, study_day: 1, study_days: days, last_day: days <= 1 ? 1 : 0, first_session: 1, sample: 1 });
+  }
+  const zone = str(q.timezone, 60) || 'UTC';
+  const today = localDate(now(), zone);
+  const done = db.prepare('SELECT completed_at FROM esm_sessions WHERE study_id = ? AND participant_id = ?').all(esm.study_id, participant);
+  const day = daysBetween(localDate(code.enrolled_at, zone), today) + 1;
+  res.json({
+    session: done.length + 1,
+    sessions_completed: done.length,
+    sessions_today: done.filter((d) => localDate(d.completed_at, zone) === today).length,
+    study_day: day,
+    study_days: days,
+    last_day: day >= days ? 1 : 0,
+    first_session: done.length === 0 ? 1 : 0,
+  });
+}
+esmApp.get('/esm/session', sessionInfo);
+esmApp.post('/esm/session', express.json({ limit: '4kb' }), express.urlencoded({ extended: false, limit: '4kb' }), sessionInfo);
 esmApp.get('/esm/code', issueForIntake);
 esmApp.post('/esm/code', express.json({ limit: '4kb' }), express.urlencoded({ extended: false, limit: '4kb' }), issueForIntake);
 esmApp.get('/esm/done', done);

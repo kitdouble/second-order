@@ -360,6 +360,31 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS esm_edit_links_study ON esm_edit_links(study_id);
 `);
+addColumn('esm_edit_links', 'kind', "TEXT NOT NULL DEFAULT 'edit'"); // 'edit' (a collaborator) or 'owner' (a self-service study's owner)
+
+// Self-service ESM: researchers without an account set up a Qualtrics-only ESM study from /esm/new with the
+// sign-up key, and manage it through an owner link. Those studies belong to this built-in account, which has no
+// passkey and can't be invited, so nobody can sign in as it.
+export const SELF_SERVICE_USER = 'self-service';
+export const SELF_SERVICE_EMAIL = 'self-service@2ndorder.invalid';
+db.prepare(`INSERT OR IGNORE INTO users (id, email, name, role, lab_member, created_at) VALUES (?, ?, 'Self-service ESM', 'member', 0, ?)`)
+  .run(SELF_SERVICE_USER, SELF_SERVICE_EMAIL, Date.now());
+db.exec(`
+  CREATE TABLE IF NOT EXISTS esm_self_service (
+    study_id      TEXT PRIMARY KEY REFERENCES studies(id) ON DELETE CASCADE,
+    contact_name  TEXT NOT NULL,
+    contact_email TEXT NOT NULL,
+    institution   TEXT,
+    created_at    INTEGER NOT NULL
+  );
+
+  -- Server-wide settings, e.g. the hash of the self-service sign-up key.
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL
+  );
+`);
 
 export const now = () => Date.now();
 export const DAY = 24 * 60 * 60 * 1000;
@@ -368,6 +393,7 @@ export const newToken = () => randomBytes(32).toString('base64url');
 export const hash = (token) => createHash('sha256').update(token).digest('hex');
 
 export function createInvite({ email, name, role = 'member', labMember = true, createdBy = null }) {
+  if (email.trim().toLowerCase() === SELF_SERVICE_EMAIL) throw new Error('That address belongs to a built-in account and can\'t be invited.');
   const token = newToken();
   db.prepare(
     `INSERT INTO invites (token_hash, email, name, role, lab_member, created_by, created_at, expires_at)

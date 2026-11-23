@@ -1,5 +1,6 @@
 // The ESM edit-link page (/esm-edit/<secret>, main origin): someone without an account edits one ESM study's
-// settings and makes codes with the shared form. The secret in the URL is the only credential; every call
+// settings and makes codes with the shared form. An owner link (a self-service study) also shows participants
+// and can delete the study. The secret in the URL is the only credential; every call
 // sends it in the path to /api/esm-edit/<secret>.
 import '../panel/panel.css';
 import './page.css';
@@ -49,15 +50,21 @@ function fail(message) {
     return fail(err.message);
   }
   document.title = `${state.study.title} · ESM settings`;
+  const owner = state.kind === 'owner';
   const form = el('div', {});
   root.replaceChildren(
     header(state.study.title),
     el('div', { class: 'page' },
       el('div', { class: 'pad intro' },
-        el('p', { class: 'note' },
-          `${state.shared_by} shared this page so you can change the ESM settings of "${state.study.title}" and make enrolment codes. `,
-          'Saved changes are live for participants at once. ',
-          `This link works until ${date(state.expires)}; keep it to yourself.`)),
+        owner
+          ? el('p', { class: 'note' },
+              el('strong', {}, 'This is your private link to this study. '),
+              'Bookmark it and keep it to yourself: anyone with it can change the study. If you lose it, ask the person who gave you the sign-up key for a new one. ',
+              'Saved changes are live for participants at once.')
+          : el('p', { class: 'note' },
+              `${state.shared_by} shared this page so you can change the ESM settings of "${state.study.title}" and make enrolment codes. `,
+              'Saved changes are live for participants at once. ',
+              `This link works until ${date(state.expires)}; keep it to yourself.`)),
       form));
   mountEsmSettings(form, {
     settings: state.settings,
@@ -72,5 +79,10 @@ function fail(message) {
     },
     download,
     refresh: async () => (await api('')).settings,
+    intakeSetup: () => api('/intake'),
+    ...(owner && {
+      status: () => api('/status'),
+      deleteStudy: () => api('/delete', { confirm: true }),
+    }),
   });
 })();
