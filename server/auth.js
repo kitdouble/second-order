@@ -15,10 +15,10 @@ const CHALLENGE_TTL = 5 * 60 * 1000;
 export const auth = Router();
 
 // Stash a WebAuthn challenge server-side; the browser only holds an opaque id.
-function saveChallenge(res, { challenge, inviteHash = null, userId = null }) {
+function saveChallenge(res, { challenge, inviteHash = null, userId = null, name = null, email = null }) {
   const id = newToken();
-  db.prepare('INSERT INTO challenges (id, challenge, invite_hash, user_id, expires_at) VALUES (?, ?, ?, ?, ?)')
-    .run(id, challenge, inviteHash, userId, now() + CHALLENGE_TTL);
+  db.prepare('INSERT INTO challenges (id, challenge, invite_hash, user_id, name, email, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(id, challenge, inviteHash, userId, name, email, now() + CHALLENGE_TTL);
   res.cookie(CHALLENGE_COOKIE, id, {
     httpOnly: true, secure: config.production, sameSite: 'strict', path: '/api/auth', maxAge: CHALLENGE_TTL,
   });
@@ -41,16 +41,40 @@ const fail = (res, status, error) => res.status(status).json({ error });
 auth.get('/invite/:token', (req, res) => {
   const invite = findOpenInvite(req.params.token);
   if (!invite) return fail(res, 404, 'This invite link is invalid, used or expired.');
+  if (!invite.email) return res.json({ open: true, name: invite.name });
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(invite.email);
-  res.json({ name: invite.name, email: invite.email, existingUser: Boolean(existing) });
+  res.json({ name: invite.name, email: invite.email, existingUser: Boolean(existing), needsName: !existing && !invite.name });
 });
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// An open invite takes the name and email from the person; a named one uses what the admin gave.
+// An open invite can only make a new account, never add a passkey to someone else's.
+function inviteIdentity(invite, body) {
+  const name = invite.name || String(body?.name ?? '').trim();
+  if (invite.email) {
+    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(invite.email);
+    if (!existing && !name) return { error: 'Please enter your name.' };
+    return { name, email: invite.email };
+  }
+  const email = String(body?.email ?? '').trim();
+  if (!name) return { error: 'Please enter your name.' };
+  if (!EMAIL.test(email)) return { error: 'Please enter a valid email address.' };
+  if (db.prepare('SELECT id FROM users WHERE email = ?').get(email)) {
+    return { error: 'That email already has an account. Sign in instead, or ask an admin for a link to add a passkey.' };
+  }
+  return { name, email };
+}
 
 auth.post('/invite/:token/options', async (req, res) => {
   const invite = findOpenInvite(req.params.token);
   if (!invite) return fail(res, 404, 'This invite link is invalid, used or expired.');
 
+  const who = inviteIdentity(invite, req.body);
+  if (who.error) return fail(res, 400, who.error);
+
   // An invite for an existing email adds a passkey to that account (new device / recovery).
-  const existing = db.prepare('SELECT * FROM users WHERE email = ?').get(invite.email);
+  const existing = invite.email ? db.prepare('SELECT * FROM users WHERE email = ?').get(invite.email) : null;
   const userId = existing?.id ?? newId();
   const excludeCredentials = existing
     ? db.prepare('SELECT id, transports FROM credentials WHERE user_id = ?').all(userId)
@@ -61,14 +85,14 @@ auth.post('/invite/:token/options', async (req, res) => {
     rpName: config.rpName,
     rpID: config.rpID,
     userID: new TextEncoder().encode(userId),
-    userName: invite.email,
-    userDisplayName: existing?.name ?? invite.name,
+    userName: who.email,
+    userDisplayName: existing?.name ?? who.name,
     attestationType: 'none',
     excludeCredentials,
     authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
   });
 
-  saveChallenge(res, { challenge: options.challenge, inviteHash: invite.token_hash, userId });
+  saveChallenge(res, { challenge: options.challenge, inviteHash: invite.token_hash, userId, name: who.name, email: who.email });
   res.json(options);
 });
 
@@ -99,8 +123,13 @@ auth.post('/invite/:token/verify', async (req, res) => {
   try {
     const existing = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
     if (!existing) {
+      const email = pending.email ?? invite.email;
+      if (db.prepare('SELECT id FROM users WHERE email = ?').get(email)) {
+        db.exec('ROLLBACK');
+        return fail(res, 400, 'That email already has an account. Sign in instead.');
+      }
       db.prepare('INSERT INTO users (id, email, name, role, lab_member, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(userId, invite.email, invite.name, invite.role, invite.lab_member ?? 1, now());
+        .run(userId, email, pending.name ?? invite.name, invite.role, invite.lab_member ?? 1, now());
     }
     db.prepare(
       `INSERT INTO credentials (id, user_id, public_key, counter, transports, created_at)

@@ -108,7 +108,9 @@ export function buildServer() {
        FROM users u ORDER BY u.created_at`
     ).all();
     const pendingInvites = db.prepare(
-      `SELECT name, email, role, datetime(expires_at / 1000, 'unixepoch') AS expires
+      `SELECT COALESCE(NULLIF(name, ''), '(open: they enter it)') AS name,
+              COALESCE(NULLIF(email, ''), '(open: they enter it)') AS email,
+              role, datetime(expires_at / 1000, 'unixepoch') AS expires
        FROM invites WHERE used_at IS NULL AND expires_at > ? ORDER BY created_at`
     ).all(Date.now());
     return text({ users, pendingInvites });
@@ -118,18 +120,20 @@ export function buildServer() {
     title: 'Create invite link',
     description:
       'Admin only. Create a single-use sign-up link (valid ' + config.inviteDays + ' days) for a person to join Second Order with a passkey. ' +
-      'If the email already has an account, the link adds a passkey for a new device instead. ' +
+      'Name and email are optional: leave them out (the usual case) and the person enters their own name and email when they set up their passkey. ' +
+      'Only give an email to add a passkey to an existing account (new device or recovery), or if the admin supplies one. ' +
       'Returns the link for the admin to send; nothing is emailed.',
     inputSchema: {
-      name: z.string().min(1).describe('Full name of the person being invited'),
-      email: z.string().email().describe('Their email address (their account identifier)'),
+      name: z.string().min(1).optional().describe('Full name. Optional; omit to let them enter it.'),
+      email: z.string().email().optional().describe('Email (their account identifier). Optional; omit to let them enter it. If it already has an account, the link adds a passkey for a new device.'),
       admin: z.boolean().default(false).describe('Make them an admin. Only do this if explicitly asked.'),
       lab_member: z.boolean().default(true).describe('false for a colleague outside the lab: they can build and run studies with their own consent/debrief, but cannot use Prolific or the lab\'s default protocol.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, adminOnly(async ({ name, email, admin, lab_member }, extra) => {
     const { url } = createInvite({ name, email, role: admin ? 'admin' : 'member', labMember: lab_member, createdBy: userOf(extra).id });
-    return text(`Invite for ${name} <${email}>${admin ? ' as admin' : ''}${lab_member ? '' : ' (not a lab member: no Prolific, no default protocol)'}. Single use, expires in ${config.inviteDays} days:\n\n${url}`);
+    const who = email ? `${name ?? email} <${email}>` : 'a new user (they enter their name and email)';
+    return text(`Invite for ${who}${admin ? ' as admin' : ''}${lab_member ? '' : ' (not a lab member: no Prolific, no default protocol)'}. Single use, expires in ${config.inviteDays} days:\n\n${url}`);
   }));
 
   server.registerTool('set_lab_member', {
