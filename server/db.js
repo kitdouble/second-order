@@ -343,6 +343,24 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS esm_done_calls_study ON esm_done_calls(study_id, at);
 `);
 
+// Secret links that let someone without an account edit one ESM study's settings and make codes, acting as
+// the researcher who made the link (and only while that researcher can still edit the study).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS esm_edit_links (
+    id           TEXT PRIMARY KEY,               -- short, shown to researchers to revoke by
+    token_hash   TEXT NOT NULL UNIQUE,           -- sha256 of the secret in the URL; the secret itself is not kept
+    study_id     TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
+    label        TEXT NOT NULL,                  -- who it is for
+    created_by   TEXT NOT NULL REFERENCES users(id),
+    created_at   INTEGER NOT NULL,
+    expires_at   INTEGER NOT NULL,
+    revoked_at   INTEGER,
+    last_used_at INTEGER,
+    last_action  TEXT
+  );
+  CREATE INDEX IF NOT EXISTS esm_edit_links_study ON esm_edit_links(study_id);
+`);
+
 export const now = () => Date.now();
 export const DAY = 24 * 60 * 60 * 1000;
 export const newId = () => randomUUID();
@@ -366,7 +384,7 @@ export function findOpenInvite(token) {
 
 export function pruneExpired() {
   db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now());
-  for (const table of ['challenges', 'oauth_requests', 'oauth_codes', 'oauth_tokens', 'upload_links', 'download_links', 'import_links', 'prolific_quotes']) {
+  for (const table of ['challenges', 'oauth_requests', 'oauth_codes', 'oauth_tokens', 'upload_links', 'download_links', 'import_links', 'prolific_quotes', 'esm_edit_links']) {
     db.prepare(`DELETE FROM ${table} WHERE expires_at <= ?`).run(now());
   }
 }

@@ -11,6 +11,7 @@ import { runApp } from './run.js';
 import { uploads } from './uploads.js';
 import { downloads } from './data.js';
 import { imports } from './exports.js';
+import { esmEdit } from './esm-edit.js';
 import { collectGarbage } from './live.js';
 
 const app = express();
@@ -41,6 +42,7 @@ main.use('/mcp', mcp);
 main.use('/api/downloads', downloads);
 main.get('/api/me', requireUser, (req, res) => res.json({ user: req.user }));
 main.get('/api/health', (_req, res) => res.json({ ok: true }));
+main.use(esmEdit); // /esm-edit/<secret> and its API: no account, the secret is the credential
 main.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 // In production the API also serves the built front end.

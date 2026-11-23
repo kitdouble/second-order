@@ -1,0 +1,23 @@
+/* The ESM edit-link page: the panel's styles, as a page of its own. */
+html,
+body {
+  min-height: 100%;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding-bottom: 40px;
+}
+
+.intro {
+  padding-bottom: 0;
+}
+
+.intro .note {
+  margin: 4px 0 0;
+}
+
+.bar .title {
+  color: var(--text);
+}

@@ -18,7 +18,7 @@ import { getDocument, listDocuments, saveDocument } from './documents.js';
 import { createDownloadLink, deleteData, deletionLog, summariseData } from './data.js';
 import { leaveFeedback, listFeedback, resolveFeedback } from './feedback.js';
 import { addPlaces, createDraft, demographics, launch, listProlificStudies, prolificStatus, requireProlific, setProlificStatus } from './prolific.js';
-import { createCodes, esmSettings, esmStatus, intakeSetup, setSchedule } from './esm.js';
+import { createCodes, createEditLink, esmSettings, esmStatus, intakeSetup, revokeEditLink, scheduleInput, setSchedule } from './esm.js';
 import { createExportLink, createImportLink } from './exports.js';
 import { MCP_APP_MIME, PANEL_URI, panelHtml, panelMeta, panelToolMeta } from './mcp-app.js';
 
@@ -83,7 +83,7 @@ export function buildServer() {
         'or replication that mostly reuses a design) is a separate study: make it with copy_study, not by editing the original. Workflow: get_authoring_guide, create_study, ' +
         'update_experiment, simulate, show_dashboard, check_launch, ' +
         'create_participant_link (or for Prolific create_prolific_draft then launch_prolific_study), study_status, quality_report, get_data (or summarise_data for large data sets). ' +
-        'ESM / EMA (experience sampling through the MetaForge phone app): set_esm_schedule, create_esm_codes or the esmCode block, esm_status; show_esm_dashboard lets the researcher edit the settings and make codes themselves. ' +
+        'ESM / EMA (experience sampling through the MetaForge phone app): set_esm_schedule, create_esm_codes or the esmCode block, esm_status; show_esm_dashboard lets the researcher edit the settings and make codes themselves, and create_esm_edit_link lets someone without an account do so. ' +
         'Never claim a study is collecting data unless get_study shows an open participant link with participants. ' +
         'Second Order is new: when a tool fails, behaves unexpectedly, is missing something you needed, or its description or the ' +
         'guide misled you, call leave_feedback with a short note for the maintainers (no participant data). Do this without asking, ' +
@@ -487,24 +487,7 @@ export function buildServer() {
       'have them confirm they are done (try a test code) before real codes go out. Close such a study with closed: true.',
     inputSchema: {
       study_id: z.string(),
-      survey_url: z.string().max(500).nullable().optional().describe('Anonymous link of a survey hosted in Qualtrics (https://….qualtrics.com/jfe/form/SV_…); the app opens it for each prompt. null: go back to the study\'s own experiment'),
-      closed: z.boolean().optional().describe('true: stop new enrolments and session reports (the way to end a Qualtrics-hosted study); false: reopen'),
-      app_title: z.string().min(1).max(80).optional().describe('Study name participants see in the app (required the first time)'),
-      schedule_type: z.enum(['random', 'fixed']).optional().describe('random: prompts at random times in the window, at least min_gap_minutes apart. fixed: evenly spaced through the window'),
-      prompts_per_day: z.number().int().min(1).max(20).optional(),
-      days: z.number().int().min(1).max(365).optional().describe('How many days the study runs from enrolment'),
-      start_time: z.string().optional().describe('Daily window start, 24-hour "HH:mm" in the participant\'s own time zone'),
-      end_time: z.string().optional().describe('Daily window end, "HH:mm"'),
-      min_gap_minutes: z.number().int().min(1).max(1440).optional().describe('Minimum minutes between random prompts'),
-      expires_after_minutes: z.number().int().min(1).max(1440).optional().describe('How long each prompt\'s survey stays open'),
-      goal_sessions: z.number().int().min(1).max(10000).nullable().optional().describe('End the study for a participant after this many completed sessions (null: no goal)'),
-      contact_email: z.string().email().nullable().optional().describe('Shown in the app as "contact researcher" (null: no contact button). Only set what the researcher gives you'),
-      show_next_prompt_time: z.boolean().optional().describe('Show participants when their next prompt is due'),
-      allow_reschedule: z.boolean().optional().describe('Let participants see the full schedule and reschedule prompts'),
-      start_tomorrow: z.boolean().optional().describe('No prompts on the day of enrolment'),
-      start_with_survey: z.boolean().optional().describe('Offer a first survey straight after enrolment'),
-      one_survey_per_day: z.boolean().optional().describe('After one completed survey, cancel the rest of that day\'s prompts'),
-      participant_initiated: z.boolean().optional().describe('Event-contingent: participants open a survey themselves when the event happens, as well as or instead of prompts'),
+      ...scheduleInput,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, handled(async ({ study_id, ...args }, extra) => {
@@ -527,6 +510,34 @@ export function buildServer() {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, handled(async ({ study_id, ...args }, extra) => {
     const result = createCodes(userOf(extra), study_id, args);
+    return { ...text(result), structuredContent: { result, esm_settings: esmSettings(userOf(extra), study_id) } };
+  }));
+
+  server.registerTool('create_esm_edit_link', {
+    title: 'Create ESM edit link',
+    description:
+      'A secret link to a web page where someone without a Second Order account (a collaborator, an RA) can change one ESM study\'s settings ' +
+      '(app title, Qualtrics survey link, schedule, closed) and make enrolment codes, acting as you. Only on the researcher\'s request, for a named ' +
+      'person. The link is returned once and not stored; it expires (default 14 days) and can be revoked with revoke_esm_edit_link. It gives no access ' +
+      'to data, the experiment or other studies. Tell the researcher to send it only to that person. The ESM dashboard can also make and revoke these.',
+    inputSchema: {
+      study_id: z.string(),
+      label: z.string().min(1).max(80).describe('Who it is for, e.g. "Sam (RA)"'),
+      days: z.number().int().min(1).max(90).default(14).describe('How long it works'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, handled(async ({ study_id, ...args }, extra) => {
+    const result = createEditLink(userOf(extra), study_id, args);
+    return { ...text(result), structuredContent: { result, esm_settings: esmSettings(userOf(extra), study_id) } };
+  }));
+
+  server.registerTool('revoke_esm_edit_link', {
+    title: 'Revoke ESM edit link',
+    description: 'Stop an ESM edit link working at once. link_id is from edit_links in esm_status.',
+    inputSchema: { study_id: z.string(), link_id: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, handled(async ({ study_id, link_id }, extra) => {
+    const result = revokeEditLink(userOf(extra), study_id, link_id);
     return { ...text(result), structuredContent: { result, esm_settings: esmSettings(userOf(extra), study_id) } };
   }));
 

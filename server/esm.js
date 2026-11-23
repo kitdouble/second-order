@@ -6,8 +6,9 @@
 // A study can instead point the app at a survey hosted in Qualtrics (survey_url): the survey reads those
 // parameters as embedded data and tells /esm/done when a session is finished, and the sessions are counted there.
 import express from 'express';
+import { z } from 'zod';
 import { randomBytes, randomInt } from 'node:crypto';
-import { db, newToken, now, DAY } from './db.js';
+import { db, hash, newToken, now, DAY } from './db.js';
 import { config } from './config.js';
 import { currentRevision } from './live.js';
 import { findStudy, iso, roleIn, StudyError } from './studies.js';
@@ -29,6 +30,28 @@ export const DEFAULT_SCHEDULE = {
   startWithSurvey: false,
   oneSurveyPerDay: false,
   eventContingent: false,
+};
+
+// set_esm_schedule's settings (everything but study_id), shared with the edit-link page's API.
+export const scheduleInput = {
+  survey_url: z.string().max(500).nullable().optional().describe('Anonymous link of a survey hosted in Qualtrics (https://….qualtrics.com/jfe/form/SV_…); the app opens it for each prompt. null: go back to the study\'s own experiment'),
+  closed: z.boolean().optional().describe('true: stop new enrolments and session reports (the way to end a Qualtrics-hosted study); false: reopen'),
+  app_title: z.string().min(1).max(80).optional().describe('Study name participants see in the app (required the first time)'),
+  schedule_type: z.enum(['random', 'fixed']).optional().describe('random: prompts at random times in the window, at least min_gap_minutes apart. fixed: evenly spaced through the window'),
+  prompts_per_day: z.number().int().min(1).max(20).optional(),
+  days: z.number().int().min(1).max(365).optional().describe('How many days the study runs from enrolment'),
+  start_time: z.string().optional().describe('Daily window start, 24-hour "HH:mm" in the participant\'s own time zone'),
+  end_time: z.string().optional().describe('Daily window end, "HH:mm"'),
+  min_gap_minutes: z.number().int().min(1).max(1440).optional().describe('Minimum minutes between random prompts'),
+  expires_after_minutes: z.number().int().min(1).max(1440).optional().describe('How long each prompt\'s survey stays open'),
+  goal_sessions: z.number().int().min(1).max(10000).nullable().optional().describe('End the study for a participant after this many completed sessions (null: no goal)'),
+  contact_email: z.string().email().nullable().optional().describe('Shown in the app as "contact researcher" (null: no contact button). Only set what the researcher gives you'),
+  show_next_prompt_time: z.boolean().optional().describe('Show participants when their next prompt is due'),
+  allow_reschedule: z.boolean().optional().describe('Let participants see the full schedule and reschedule prompts'),
+  start_tomorrow: z.boolean().optional().describe('No prompts on the day of enrolment'),
+  start_with_survey: z.boolean().optional().describe('Offer a first survey straight after enrolment'),
+  one_survey_per_day: z.boolean().optional().describe('After one completed survey, cancel the rest of that day\'s prompts'),
+  participant_initiated: z.boolean().optional().describe('Event-contingent: participants open a survey themselves when the event happens, as well as or instead of prompts'),
 };
 
 // MCP field names (snake_case) to the apps' names.
@@ -341,10 +364,12 @@ const isClosed = (esm) => !!esm.closed_at || !!(esm.link_token && db.prepare('SE
 
 /**
  * What the in-chat ESM settings panel shows and edits. For a study without a schedule yet, the defaults it
- * would start from (configured: false), so the panel can set it up.
+ * would start from (configured: false), so the panel can set it up. viaLink: for the edit-link page, which
+ * acts as the link's creator but must not see or make other links.
  */
-export function esmSettings(user, studyId) {
+export function esmSettings(user, studyId, { viaLink = false } = {}) {
   const study = findStudy(user, studyId);
+  const canEdit = ['owner', 'editor'].includes(study.your_role);
   const esm = esmOf(study.id);
   const closedAt = esm && (esm.closed_at ?? (esm.link_token && db.prepare('SELECT closed_at FROM links WHERE token = ?').get(esm.link_token)?.closed_at));
   const count = (where) => db.prepare(`SELECT COUNT(*) AS n FROM esm_codes WHERE study_id = ? AND ${where}`).get(study.id).n;
@@ -353,7 +378,7 @@ export function esmSettings(user, studyId) {
     : [];
   return {
     configured: !!esm,
-    can_edit: ['owner', 'editor'].includes(study.your_role),
+    can_edit: canEdit,
     has_experiment: !!currentRevision(study.id),
     app_title: esm?.app_title ?? '',
     survey_url: esm?.survey_url ?? null,
@@ -364,7 +389,72 @@ export function esmSettings(user, studyId) {
       ? { issued: count('is_test = 0'), unused: count('is_test = 0 AND enrolled_at IS NULL AND withdrawn_at IS NULL'), enrolled: count('is_test = 0 AND enrolled_at IS NOT NULL'), withdrawn: count('is_test = 0 AND withdrawn_at IS NOT NULL'), test: count('is_test = 1') }
       : null,
     unused_codes: unused.map((c) => ({ code: showCode(c.code), label: c.label, ...(c.is_test && { test: true }), created: iso(c.created_at) })),
+    ...(!viaLink && canEdit && { edit_links: editLinks(study.id) }),
   };
+}
+
+/* ---------- Edit links: someone without an account edits the settings ---------- */
+
+const MAX_EDIT_LINKS = 20;
+export const editLinkUrl = (token) => `${config.origin}/esm-edit/${token}`;
+
+/** Active (not revoked, not expired) edit links for a study, without their secrets. */
+export function editLinks(studyId) {
+  return db.prepare(
+    `SELECT l.*, u.name AS creator FROM esm_edit_links l JOIN users u ON u.id = l.created_by
+     WHERE l.study_id = ? AND l.revoked_at IS NULL AND l.expires_at > ? ORDER BY l.created_at`
+  ).all(studyId, now()).map((l) => ({
+    id: l.id, label: l.label, created_by: l.creator, created: iso(l.created_at), expires: iso(l.expires_at),
+    last_used: iso(l.last_used_at), ...(l.last_action && { last_action: l.last_action }),
+  }));
+}
+
+export function createEditLink(user, studyId, { label, days = 14 }) {
+  const study = findStudy(user, studyId, 'edit');
+  const name = String(label ?? '').trim();
+  if (!name) throw new StudyError('Give label: who the link is for, so it can be told apart and revoked.');
+  if (editLinks(study.id).length >= MAX_EDIT_LINKS) throw new StudyError(`This study already has ${MAX_EDIT_LINKS} active edit links; revoke some first.`);
+  const token = newToken();
+  const id = randomBytes(4).toString('hex');
+  const expires = now() + days * DAY;
+  db.prepare('INSERT INTO esm_edit_links (id, token_hash, study_id, label, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(id, hash(token), study.id, name, user.id, now(), expires);
+  return {
+    url: editLinkUrl(token),
+    id,
+    label: name,
+    expires: iso(expires),
+    note: 'Shown only this once: Second Order keeps no copy of the link. Whoever has it can change this study\'s ESM settings (including the Qualtrics link), ' +
+      'close or reopen it and make enrolment codes, acting as you, until it expires or is revoked (revoke_esm_edit_link). They cannot see participants\' data, the experiment or other studies. ' +
+      'Their changes show as "last used" in esm_status and the ESM dashboard.',
+  };
+}
+
+export function revokeEditLink(user, studyId, linkId) {
+  const study = findStudy(user, studyId, 'edit');
+  const { changes } = db.prepare('UPDATE esm_edit_links SET revoked_at = ? WHERE id = ? AND study_id = ? AND revoked_at IS NULL').run(now(), String(linkId), study.id);
+  if (!changes) throw new StudyError('No active edit link with that id on this study (see edit_links in show_esm_dashboard or esm_status).');
+  return { revoked: String(linkId), note: 'The link stopped working at once.' };
+}
+
+/**
+ * The study and acting user behind an edit link's secret, or a StudyError a person can read. The link acts as
+ * its creator, and only while the creator can still edit the study.
+ */
+export function editLinkAccess(token) {
+  const link = typeof token === 'string' && token.length <= 100 && db.prepare('SELECT * FROM esm_edit_links WHERE token_hash = ?').get(hash(token));
+  if (!link) return null;
+  if (link.revoked_at) throw new StudyError('This edit link was revoked. Ask the researcher for a new one.');
+  if (link.expires_at <= now()) throw new StudyError('This edit link has expired. Ask the researcher for a new one.');
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(link.created_by);
+  let study;
+  try { study = user && findStudy(user, link.study_id, 'edit'); } catch { study = null; }
+  if (!study) throw new StudyError('This edit link no longer works: the researcher who made it can no longer edit the study.');
+  return { link, user, study };
+}
+
+export function noteEditLinkUse(linkId, action) {
+  db.prepare('UPDATE esm_edit_links SET last_used_at = ?, last_action = ? WHERE id = ?').run(now(), action.slice(0, 300), linkId);
 }
 
 /* ---------- Status ---------- */
@@ -424,6 +514,7 @@ export function esmStatus(user, studyId, { include_test = false } = {}) {
       withdrawn: codes.filter((c) => c.withdrawn_at).length,
     },
     participants,
+    edit_links: editLinks(study.id),
     ...(calls.length || external ? { recent_qualtrics_calls: calls } : {}),
     note: 'compliance = completed sessions / prompts sent so far (approximate: counted in whole days since enrolment). ' +
       (external

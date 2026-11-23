@@ -6,6 +6,7 @@ copy_stimuli
 copy_study
 create_download_link
 create_esm_codes
+create_esm_edit_link
 create_invite
 create_participant_link
 create_prolific_draft
@@ -40,6 +41,7 @@ remove_member
 remove_stimulus
 resolve_feedback
 restore_version
+revoke_esm_edit_link
 save_document
 save_version
 set_esm_schedule
