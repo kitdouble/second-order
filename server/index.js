@@ -11,7 +11,7 @@ import { runApp } from './run.js';
 import { uploads } from './uploads.js';
 import { downloads } from './data.js';
 import { imports } from './exports.js';
-import { esmEdit } from './esm-edit.js';
+import { esmEdit, esmSite } from './esm-edit.js';
 import { collectGarbage } from './live.js';
 import { pruneSelfService } from './esm.js';
 
@@ -56,7 +56,11 @@ if (config.production && existsSync(dist)) {
 /* ---------- Dispatch by host ---------- */
 
 const runHost = new URL(config.runOrigin).host;
-app.use((req, res, next) => (req.get('host') === runHost ? runApp : main)(req, res, next));
+const esmHost = config.esmOrigin && new URL(config.esmOrigin).host;
+app.use((req, res, next) => {
+  const host = req.get('host');
+  (host === runHost ? runApp : esmHost && host === esmHost ? esmSite : main)(req, res, next);
+});
 
 app.use((err, _req, res, _next) => {
   console.error(err);

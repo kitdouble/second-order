@@ -7,6 +7,9 @@ export const config = {
   mcpUrl: `${origin}/mcp`,
   // Experiments run on their own origin so participant-facing code can never reach sessions or the API.
   runOrigin: (process.env.RUN_ORIGIN || 'http://127.0.0.1:3000').replace(/\/$/, ''),
+  // Optional: the self-service ESM site (sign-up page at its root, owner links). Unset: those pages live on the main
+  // origin, at /esm/new and /esm-edit/<secret>.
+  esmOrigin: process.env.ESM_ORIGIN ? process.env.ESM_ORIGIN.replace(/\/$/, '') : null,
   rpID: process.env.RP_ID || new URL(origin).hostname,
   rpName: 'Second Order',
   dbPath: process.env.DB_PATH || 'data/second-order.db',

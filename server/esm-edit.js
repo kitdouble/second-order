@@ -4,9 +4,10 @@
 //   /esm-edit/<secret>   edit or owner link: change one ESM study's settings and make codes. Collaborator links
 //                        (create_esm_edit_link) act as the researcher who made them; owner links belong to
 //                        self-service studies and can also see participants and delete the study.
-//   /esm/new             self-service sign-up with the shared key: a Qualtrics-only ESM study and its owner link.
+//   /esm/new             self-service sign-up with the shared key: a Qualtrics-only ESM study and its owner link
+//                        (at the root of the ESM site when ESM_ORIGIN is set; /esm/new then redirects there).
 //   /api/esm-edit/<secret>…, /api/esm-signup   what the pages call.
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { build } from 'esbuild';
 import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
@@ -17,6 +18,7 @@ import {
   noteEditLinkUse, scheduleInput, setSchedule, signupOpen,
 } from './esm.js';
 import { StudyError } from './studies.js';
+import { config } from './config.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -101,7 +103,10 @@ const handle = (fn) => (req, res, next) => {
 export const esmEdit = Router();
 
 esmEdit.get('/esm-edit/:token', (_req, res) => res.set(editPage.headers).type('html').send(editPage.html));
-esmEdit.get('/esm/new', (_req, res) => res.set(signupPage.headers).type('html').send(signupPage.html));
+// With an ESM site (ESM_ORIGIN), the sign-up page lives at its root; the old address sends people there.
+esmEdit.get('/esm/new', (req, res) => (config.esmOrigin && req.get('host') !== new URL(config.esmOrigin).host
+  ? res.redirect(302, config.esmOrigin)
+  : res.set(signupPage.headers).type('html').send(signupPage.html)));
 
 /* ---------- Self-service sign-up ---------- */
 
@@ -194,3 +199,16 @@ esmEdit.post('/api/esm-edit/:token/delete', handle((req) => {
   if (req.body?.confirm !== true) throw new StudyError('Send confirm: true to delete.');
   return deleteSelfService(req.esmEdit.study.id);
 }));
+
+/* ---------- The ESM site (ESM_ORIGIN, e.g. esm.2ndorder.live) ---------- */
+
+// Only these pages and their API: no accounts, MCP or experiments on this host.
+export const esmSite = Router();
+esmSite.use((_req, res, next) => {
+  res.set({ 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY' });
+  next();
+});
+esmSite.use(express.json({ limit: '64kb' }));
+esmSite.get('/', (_req, res) => res.set(signupPage.headers).type('html').send(signupPage.html));
+esmSite.use(esmEdit);
+esmSite.use((_req, res) => res.status(404).type('text').send('Not found'));

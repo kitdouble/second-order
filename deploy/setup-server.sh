@@ -93,7 +93,7 @@ systemctl daemon-reload
 systemctl enable second-order-sim second-order
 
 cat > /etc/caddy/Caddyfile <<CADDY
-${DOMAIN}, run.${DOMAIN} {
+${DOMAIN}, run.${DOMAIN}, esm.${DOMAIN} {
 	encode {
 		gzip
 		match {

@@ -442,7 +442,8 @@ export function esmSettings(user, studyId, { viaLink = false } = {}) {
 /* ---------- Edit links: someone without an account edits the settings ---------- */
 
 const MAX_EDIT_LINKS = 20;
-export const editLinkUrl = (token) => `${config.origin}/esm-edit/${token}`;
+export const editLinkUrl = (token) => `${config.esmOrigin ?? config.origin}/esm-edit/${token}`;
+export const signupUrl = () => config.esmOrigin ?? `${config.origin}/esm/new`;
 
 /** Active (not revoked, not expired) edit links for a study, without their secrets. */
 export function editLinks(studyId) {
@@ -549,7 +550,7 @@ export function setSignupKey(key) {
   db.prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
     .run(SIGNUP_KEY, hash(value), now());
   return {
-    signup_url: `${config.origin}/esm/new`,
+    signup_url: signupUrl(),
     key: value,
     note: 'Share the page and this key with researchers who want to run a Qualtrics ESM study. Only a hash of the key is kept, so note it now; ' +
       'setting a new key stops the old one working (existing studies are not affected).',
@@ -605,7 +606,7 @@ export function listSelfService() {
   const rows = db.prepare('SELECT g.*, e.app_title, e.survey_url, e.closed_at FROM esm_self_service g LEFT JOIN esm_studies e ON e.study_id = g.study_id ORDER BY g.created_at DESC').all();
   const count = (sql, id) => db.prepare(sql).get(id).n;
   return {
-    signup: signupOpen() ? `open at ${config.origin}/esm/new` : 'closed (no key set)',
+    signup: signupOpen() ? `open at ${signupUrl()}` : 'closed (no key set)',
     limits: { studies: `${rows.length} of ${MAX_SELF_SERVICE_STUDIES}`, codes_per_study: MAX_SELF_SERVICE_CODES },
     studies: rows.map((r) => ({
       study_id: r.study_id,
