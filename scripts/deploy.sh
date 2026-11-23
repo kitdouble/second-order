@@ -24,6 +24,7 @@ fi
 if [ -n "$DOMAIN" ] && ! grep -q '^ESM_ORIGIN=' .env && getent hosts "esm.${DOMAIN}" >/dev/null; then
   echo "ESM_ORIGIN=https://esm.${DOMAIN}" >> .env
 fi
+grep -q '^ESM_ORIGIN=' .env && echo "ESM site: on ($(grep '^ESM_ORIGIN=' .env | cut -d= -f2))" || echo "ESM site: waiting for DNS for esm.${DOMAIN}"
 systemctl restart second-order-sim second-order
 systemctl is-active second-order
 curl -fsS --retry 10 --retry-delay 1 --retry-connrefused http://127.0.0.1:3000/api/health && echo
