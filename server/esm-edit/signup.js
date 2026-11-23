@@ -26,7 +26,7 @@ function done({ owner_url }) {
     el('ol', { class: 'steps' },
       el('li', {}, 'Open your link. Under "Set up the survey for the app", add the Survey Flow steps to your Qualtrics survey and publish it.'),
       el('li', {}, 'Check the schedule (prompts per day, days, the daily window) and save.'),
-      el('li', {}, 'Make a test code, enter it in the MetaForge app on your phone, and complete a survey: the participant table should show it.'),
+      el('li', {}, 'Make a test code, enter it in the MetaForge app on your phone (', el('a', { href: 'https://apps.apple.com/au/app/metaforge-live/id6758686932', target: '_blank', rel: 'noopener' }, 'MetaForge Live'), ' on iPhone), and complete a survey: the participant table should show it.'),
       el('li', {}, 'Then make real codes, or set up a Qualtrics intake survey that gives each respondent a code.')),
     el('p', {}, el('a', { class: 'btn primary', href: owner_url }, 'Open my study'))));
 }
@@ -77,7 +77,7 @@ function done({ owner_url }) {
 
   root.replaceChildren(header(), el('div', { class: 'page pad' },
     el('h3', {}, 'Set up a Qualtrics ESM study'),
-    el('p', {}, 'Run an experience sampling study with the free MetaForge phone app ("MetaForge Live" on iPhone, "MetaForge EMA" on Android) and a survey you build in Qualtrics. ' +
+    el('p', {}, 'Run an experience sampling study with the free MetaForge phone app (', el('a', { href: 'https://apps.apple.com/au/app/metaforge-live/id6758686932', target: '_blank', rel: 'noopener' }, 'MetaForge Live'), ' on iPhone, MetaForge EMA on Android) and a survey you build in Qualtrics. ' +
       'Participants enter a code in the app and get notifications on your schedule; each notification opens your survey. You need the sign-up key from the person who sent you here.'),
     el('form', { class: 'esm-form', novalidate: true, onsubmit: send },
       el('div', { class: 'form-grid' },

@@ -52,7 +52,7 @@ function codePage(code, instructions) {
   return `<div style="max-width:560px;margin:0 auto;text-align:left">
     <p>The next part of this study happens on your phone, over the coming days.</p>
     <ol>
-      <li>Install the free app: <strong>MetaForge Live</strong> from the App Store (iPhone) or <strong>MetaForge EMA</strong> from Google Play (Android).</li>
+      <li>Install the free app: on iPhone, <a href="https://apps.apple.com/au/app/metaforge-live/id6758686932" target="_blank" rel="noopener"><strong>MetaForge Live</strong> from the App Store</a>; on Android, <strong>MetaForge EMA</strong> from Google Play.</li>
       <li>Open it, agree to the terms, and enter this code:</li>
     </ol>
     <div style="text-align:center">${codeBox(code)}</div>

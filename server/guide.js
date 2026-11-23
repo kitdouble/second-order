@@ -116,7 +116,7 @@ return [deviceCheck({ devices: ["computer"] }), consent({ minutes: 15 }), demogr
 
 ## ESM / EMA studies (experience sampling on participants' phones)
 
-Participants use the MetaForge phone app ("MetaForge Live" on iPhone, "MetaForge EMA" on Android). They enter a
+Participants use the MetaForge phone app ("MetaForge Live" on iPhone: https://apps.apple.com/au/app/metaforge-live/id6758686932; "MetaForge EMA" on Android). They enter a
 single-use code, the app sends notifications on the study's schedule, and each notification opens the study's live
 experiment as one session. Set up:
 

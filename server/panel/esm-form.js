@@ -273,7 +273,7 @@ export function mountEsmSettings(container, options) {
                 el('td', {}, date(c.created))))))),
             codeActions(unused, 'esm-unused-codes'))
         : null,
-      el('p', { class: 'muted' }, 'Participants install "MetaForge Live" (iPhone) or "MetaForge EMA" (Android) and enter their code. Codes given out by an intake study or intake survey are not listed here.'));
+      el('p', { class: 'muted' }, 'Participants install ', el('a', { href: 'https://apps.apple.com/au/app/metaforge-live/id6758686932', target: '_blank', rel: 'noopener' }, 'MetaForge Live'), ' (iPhone, App Store) or MetaForge EMA (Android, Google Play) and enter their code. Codes given out by an intake study or intake survey are not listed here.'));
   }
 
   function qualtricsSection(setup) {
