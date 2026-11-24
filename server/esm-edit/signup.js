@@ -3,7 +3,7 @@
 import '../panel/panel.css';
 import './page.css';
 import { copy, el, status_ } from '../panel/ui.js';
-import { reportFooter } from './report.js';
+import { citation, reportFooter } from './report.js';
 
 const root = document.getElementById('root');
 const dark = window.matchMedia('(prefers-color-scheme: dark)');
@@ -12,7 +12,7 @@ theme();
 dark.addEventListener('change', theme);
 document.title = 'Set up a Qualtrics ESM study';
 
-const show = (...content) => root.replaceChildren(header(), ...content, el('div', { class: 'page' }, reportFooter('/api/esm-report')));
+const show = (...content) => root.replaceChildren(header(), ...content, el('div', { class: 'page' }, citation(), reportFooter('/api/esm-report')));
 const header = () => el('div', { class: 'bar' }, el('span', { class: 'brand' }, 'Second Order'), el('span', { class: 'title' }, 'Qualtrics ESM study'));
 const field = (label, input, hint) => el('label', { class: 'field' }, el('span', {}, label), input, hint ? el('small', {}, hint) : null);
 

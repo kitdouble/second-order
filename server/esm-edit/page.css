@@ -39,3 +39,20 @@ body {
 .report-form .field {
   margin-top: 10px;
 }
+
+.cite {
+  border-top: 1px solid var(--line);
+  margin-top: 24px;
+}
+
+.cite-text {
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--line);
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+
+.cite + .report {
+  margin-top: 0;
+}

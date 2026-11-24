@@ -6,7 +6,7 @@ import '../panel/panel.css';
 import './page.css';
 import { date, el } from '../panel/ui.js';
 import { mountEsmSettings } from '../panel/esm-form.js';
-import { reportFooter } from './report.js';
+import { citation, reportFooter } from './report.js';
 
 const token = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() ?? '');
 const root = document.getElementById('root');
@@ -69,6 +69,7 @@ function fail(message) {
               'Saved changes are live for participants at once. ',
               `This link works until ${date(state.expires)}; keep it to yourself.`)),
       form,
+      citation(),
       reportFooter(`/api/esm-edit/${encodeURIComponent(token)}/report`)));
   mountEsmSettings(form, {
     settings: state.settings,

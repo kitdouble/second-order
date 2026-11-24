@@ -63,6 +63,19 @@ const sections = [
     ),
   },
   {
+    title: 'How to cite',
+    body: (
+      <>
+        <p>If you publish work that used Second Order or the MetaForge app, please cite:</p>
+        <p className="about-cite">
+          Double, K. S. (preprint). <em>Second Order and MetaForge: An AI-Native Platform for Online Behavioural
+          Experiments and Ecological Momentary Assessment</em>. Retrieved from{' '}
+          <a href="https://osf.io/preprints/psyarxiv/vh7uk_v1">osf.io/preprints/psyarxiv/vh7uk_v1</a>
+        </p>
+      </>
+    ),
+  },
+  {
     title: 'Running your own',
     body: (
       <p>

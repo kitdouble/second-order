@@ -11,6 +11,12 @@ shows the connector URL.
 - `src/` — the few React pages, MetaForge visual style
 - `scripts/invite.js` — create invite links from the shell (bootstrap; afterwards use `create_invite`)
 
+## How to cite
+
+If you publish work that used Second Order or the MetaForge app, please cite:
+
+> Double, K. S. (preprint). Second Order and MetaForge: An AI-Native Platform for Online Behavioural Experiments and Ecological Momentary Assessment. Retrieved from [osf.io/preprints/psyarxiv/vh7uk_v1](https://osf.io/preprints/psyarxiv/vh7uk_v1)
+
 ## Set up your own lab (using Claude)
 
 You can copy this repo and run your own Second Order. The quickest way is to open it in

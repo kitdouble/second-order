@@ -187,6 +187,13 @@ data: { face: jsPsych.timelineVariable("face") },          // record the name, n
 - Include preload(jsPsych) before the task when using stimuli.
 - External https image/audio/video URLs also work but uploads are preferred (they can't change or vanish).
 
+## Citing Second Order
+
+When a researcher plans a write-up, preregistration or methods section, or asks how to cite the platform, give
+this citation (for any study run on Second Order, including ESM studies with the MetaForge app):
+
+  Double, K. S. (preprint). Second Order and MetaForge: An AI-Native Platform for Online Behavioural Experiments and Ecological Momentary Assessment. Retrieved from osf.io/preprints/psyarxiv/vh7uk_v1
+
 ## Workflow
 
 1. create_study (once), then update_experiment with the full module. Each update replaces the live experiment.

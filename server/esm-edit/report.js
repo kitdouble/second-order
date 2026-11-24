@@ -1,7 +1,7 @@
 // "Report a problem" at the foot of the self-service ESM pages: a short private form that reaches the Second
 // Order maintainers (list_feedback). `endpoint` is the page's report URL; from an owner or edit link the server
 // adds which study it is, so people never need to paste their link.
-import { el, status_ } from '../panel/ui.js';
+import { copy, el, status_ } from '../panel/ui.js';
 
 export function reportFooter(endpoint) {
   const summary = el('input', { type: 'text', maxlength: 200, placeholder: 'e.g. Codes won\'t generate' });
@@ -42,4 +42,20 @@ export function reportFooter(endpoint) {
   } }, 'Report a problem');
 
   return el('footer', { class: 'pad report' }, el('p', { class: 'muted' }, 'Something not working? ', toggle), form);
+}
+
+const CITATION = 'Double, K. S. (preprint). Second Order and MetaForge: An AI-Native Platform for Online Behavioural Experiments and ' +
+  'Ecological Momentary Assessment. Retrieved from osf.io/preprints/psyarxiv/vh7uk_v1';
+
+/** How to cite the platform, at the foot of the self-service pages. */
+export function citation() {
+  return el('section', { class: 'pad cite' },
+    el('h3', {}, 'How to cite'),
+    el('p', { class: 'muted' }, 'If you publish work that used Second Order or the MetaForge app, please cite:'),
+    el('p', { class: 'cite-text' },
+      'Double, K. S. (preprint). ',
+      el('em', {}, 'Second Order and MetaForge: An AI-Native Platform for Online Behavioural Experiments and Ecological Momentary Assessment'),
+      '. Retrieved from ',
+      el('a', { href: 'https://osf.io/preprints/psyarxiv/vh7uk_v1', target: '_blank', rel: 'noopener' }, 'osf.io/preprints/psyarxiv/vh7uk_v1')),
+    el('button', { class: 'btn', type: 'button', onclick: async (e) => { e.target.textContent = (await copy(CITATION)) ? 'Copied' : 'Select it above'; } }, 'Copy citation'));
 }
