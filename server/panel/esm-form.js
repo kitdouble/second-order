@@ -62,6 +62,7 @@ export function mountEsmSettings(container, options) {
   const { editable, notEditable, save, makeCodes, download, refresh, links, intakeSetup, status, deleteStudy, tell = () => {}, resized = () => {} } = options;
   let settings = null;
   let newCodes = null; // the batch just made, shown until the study changes
+  let settingsForm = null; // the settings form on screen: its unsaved changes, and saving them
   let newLink = null; // a link just made: its URL is shown once
 
   function update(next, force = false) {
@@ -173,9 +174,9 @@ export function mountEsmSettings(container, options) {
 
     async function submit() {
       const bad = problem();
-      if (bad) return show('critical', bad);
+      if (bad) { show('critical', bad); return false; }
       const changes = wanted();
-      if (!Object.keys(changes).length) return show('good', 'Nothing to save: no changes.');
+      if (!Object.keys(changes).length) { show('good', 'Nothing to save: no changes.'); return true; }
       const wasConfigured = settings.configured;
       const hadSurvey = settings.survey_url;
       saveButton.disabled = true;
@@ -191,11 +192,14 @@ export function mountEsmSettings(container, options) {
         tell(`${wasConfigured ? 'saved' : 'set up the ESM study with'} ${describeChanges(changes)}.` +
           (warnings.length ? ` Warnings shown: ${warnings.join(' ')}` : '') +
           (result.settings.qualtrics_setup && !hadSurvey ? ' The panel now shows the Qualtrics setup steps; the researcher may want help with them.' : ''));
+        return true;
       } catch (err) {
         saveButton.disabled = false;
         show('critical', err.message);
+        return false;
       }
     }
+    settingsForm = { unsaved: () => settings.configured && editable && Object.keys(wanted()).length > 0, save: submit };
 
     container.replaceChildren(el('div', { class: 'pad' },
       el('h3', {}, settings.configured ? 'ESM settings' : 'Set up experience sampling',
@@ -219,6 +223,23 @@ export function mountEsmSettings(container, options) {
     resized();
   }
 
+  async function makeCodesNow(args, button, said, afterSave = false) {
+    if (button) button.disabled = true;
+    said?.replaceChildren('Generating…');
+    try {
+      const result = await makeCodes(args);
+      const created = new Date().toISOString();
+      newCodes = { codes: result.codes.map((code) => ({ code, label: args.label ?? null, test: args.test, created })), test: args.test, note: result.note, created };
+      update(result.settings, true);
+      if (afterSave) container.querySelector('.form-message').replaceChildren(...message('good', 'Saved. Live now.'));
+      tell(`generated ${plural(args.count, args.test ? 'test code' : 'enrolment code')}${args.label ? ` labelled "${args.label}"` : ''}.`);
+    } catch (err) {
+      if (button) button.disabled = false;
+      said?.replaceChildren(...message('critical', err.message, 'Not made'));
+    }
+    resized();
+  }
+
   function codesSection() {
     const count = el('input', { type: 'number', min: 1, max: 500, step: 1, value: 10, disabled: !editable, required: true });
     const label = el('input', { type: 'text', maxlength: 120, disabled: !editable, placeholder: 'e.g. Wave 1' });
@@ -230,19 +251,25 @@ export function mountEsmSettings(container, options) {
       e.preventDefault();
       const n = Number(count.value);
       if (!Number.isInteger(n) || n < 1 || n > 500) return said.replaceChildren(...message('critical', 'How many: 1 to 500.', 'Not made'));
-      const name = label.value.trim();
-      make.disabled = true;
-      said.replaceChildren('Generating…');
-      try {
-        const result = await makeCodes({ count: n, test: test.checked, ...(name && { label: name }) });
-        const created = new Date().toISOString();
-        newCodes = { codes: result.codes.map((code) => ({ code, label: name || null, test: test.checked, created })), test: test.checked, note: result.note, created };
-        update(result.settings, true);
-        tell(`generated ${plural(n, test.checked ? 'test code' : 'enrolment code')}${name ? ` labelled "${name}"` : ''}.`);
-      } catch (err) {
-        make.disabled = false;
-        said.replaceChildren(...message('critical', err.message, 'Not made'));
-      }
+      const args = { count: n, test: test.checked, ...(label.value.trim() && { label: label.value.trim() }) };
+      if (!settingsForm?.unsaved()) return makeCodesNow(args, make, said);
+
+      // Unsaved settings: participants get the saved ones when they enrol, and making codes redraws the form.
+      const choice = (text, primary, onclick) => el('button', { class: `btn${primary ? ' primary' : ''}`, type: 'button', onclick }, text);
+      said.replaceChildren(el('div', { class: 'unsaved' },
+        el('p', {}, status_('warning', 'Unsaved changes'), ' You have changed the settings above without saving. Participants get the saved settings when they enrol, so save them first.'),
+        el('div', { class: 'chips' },
+          choice('Save and generate', true, async () => {
+            said.replaceChildren('Saving…');
+            if (!(await settingsForm.save())) {
+              return said.replaceChildren(...message('critical', 'The settings were not saved (see the message by Save changes), so no codes were made.', 'Not made'));
+            }
+            // Saving redrew the page: make the codes from the new codes section.
+            makeCodesNow(args, null, container.querySelector('.codes-form .form-message'), true);
+          }),
+          choice('Discard changes and generate', false, () => makeCodesNow(args, make, said)),
+          choice('Cancel', false, () => said.replaceChildren()))));
+      resized();
     }
 
     const unused = settings.unused_codes;
@@ -251,7 +278,7 @@ export function mountEsmSettings(container, options) {
       el('div', { class: 'tiles' },
         tile(settings.codes.issued, 'issued'), tile(settings.codes.unused, 'unused'), tile(settings.codes.enrolled, 'enrolled'),
         tile(settings.codes.withdrawn, 'withdrawn'), tile(settings.codes.test, 'test codes')),
-      el('form', { class: 'esm-form', novalidate: true, onsubmit: generate },
+      el('form', { class: 'esm-form codes-form', novalidate: true, onsubmit: generate },
         el('div', { class: 'form-grid' },
           field('How many', count, 'One per participant, single use'),
           field('Label (optional)', label, 'Kept with the codes, to tell batches apart')),

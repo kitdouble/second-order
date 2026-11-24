@@ -691,3 +691,7 @@ pre.wrap {
   border-color: var(--critical);
   color: var(--critical);
 }
+
+.unsaved p {
+  margin: 0 0 8px;
+}
