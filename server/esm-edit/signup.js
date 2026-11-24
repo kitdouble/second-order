@@ -51,7 +51,6 @@ function done({ owner_url }) {
     app_title: el('input', { type: 'text', required: true, maxlength: 80, placeholder: 'e.g. Daily mood study' }),
     survey_url: el('input', { type: 'url', required: true, maxlength: 500, placeholder: 'https://sydney.au1.qualtrics.com/jfe/form/SV_…' }),
   };
-  const agree = el('input', { type: 'checkbox' });
   const said = el('div', { class: 'form-message', role: 'status' });
   const submit = el('button', { class: 'btn primary', type: 'submit' }, 'Set up my study');
 
@@ -59,11 +58,9 @@ function done({ owner_url }) {
     e.preventDefault();
     const body = Object.fromEntries(Object.entries(inputs).map(([k, input]) => [k, input.value.trim()]));
     if (!body.institution) delete body.institution;
-    body.agree = agree.checked;
     const missing = ['key', 'name', 'email', 'app_title', 'survey_url'].find((k) => !body[k]);
     if (missing) return said.replaceChildren(status_('critical', 'Not set up'), ' Fill in every field marked as required.');
     if (!inputs.email.checkValidity()) return said.replaceChildren(status_('critical', 'Not set up'), ' Check your email address.');
-    if (!agree.checked) return said.replaceChildren(status_('critical', 'Not set up'), ' Tick the box to confirm you have read how data is handled.');
     submit.disabled = true;
     said.replaceChildren('Setting up…');
     try {
@@ -91,12 +88,5 @@ function done({ owner_url }) {
       el('div', { class: 'form-grid' },
         field('Study name in the app (required)', inputs.app_title, 'What participants see')),
       el('div', { class: 'esm-form' }, field('Qualtrics survey link (required)', inputs.survey_url, 'The survey\'s anonymous link. You can add the Survey Flow steps after setting up.')),
-      el('h3', {}, 'How data is handled'),
-      el('ul', { class: 'steps' },
-        el('li', {}, 'Survey responses go to your Qualtrics account only.'),
-        el('li', {}, 'Second Order keeps what the app needs: your settings and codes, a random ID per participant, their phone model and operating system, when they enrolled, and when each survey was completed.'),
-        el('li', {}, 'All of it is deleted 12 months after the study\'s last activity, or when you delete the study.'),
-        el('li', {}, 'Mention this in your ethics application if it asks where participant data is stored.')),
-      el('label', { class: 'check' }, agree, el('span', {}, 'I have read this and am responsible for ethics approval for my study.')),
       el('div', { class: 'form-actions' }, submit, said))));
 })();

@@ -79,7 +79,6 @@ const signupInput = z.object({
   institution: z.string().trim().max(150).optional(),
   app_title: z.string().trim().min(1).max(80),
   survey_url: z.string().trim().min(1).max(500),
-  agree: z.literal(true),
 }).strict();
 
 const reportInput = z.object({
@@ -107,7 +106,7 @@ const short = (v) => (v == null || v === '' ? 'none' : String(v).length > 40 ? `
 const parsed = (schema, body) => {
   const result = schema.safeParse(body ?? {});
   if (!result.success) {
-    throw new StudyError(result.error.issues.map((i) => (i.path[0] === 'agree' ? 'Tick the box to confirm you have read how data is handled.' : `${i.path.join('.') || 'request'}: ${i.message}`)).join('; '));
+    throw new StudyError(result.error.issues.map((i) => `${i.path.join('.') || 'request'}: ${i.message}`).join('; '));
   }
   return result.data;
 };
