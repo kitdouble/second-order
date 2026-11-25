@@ -8,8 +8,8 @@ const sections = [
           is no sign-up.
         </p>
         <p>
-          There is no researcher web interface. Researchers work through Claude or ChatGPT, which connect to Second
-          Order as a custom connector. You describe the experiment you want; the assistant writes it, tests it and
+          Researchers build and run studies through Claude or ChatGPT, which connect to Second Order as a custom
+          connector. Signing in at this site lists your studies, with their dashboards, data downloads and sharing. You describe the experiment you want; the assistant writes it, tests it and
           runs it through Second Order's tools.
         </p>
       </>
