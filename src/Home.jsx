@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './api.js';
+import DashLayout from './DashLayout.jsx';
 
 // The signed-in researcher's dashboard: their studies (with links to each study's dashboard), data downloads
 // and sharing. Building and changing experiments still happens through Claude or ChatGPT.
@@ -12,11 +13,6 @@ export default function Home({ user }) {
 
   const load = () => api('/studies').then(({ studies }) => setStudies(studies), (err) => setError(err.message));
   useEffect(() => { load(); }, []);
-
-  const signOut = async () => {
-    await api('/auth/logout', { method: 'POST' }).catch(() => {});
-    window.location.replace('/login');
-  };
 
   const shown = useMemo(() => {
     if (!studies) return [];
@@ -32,91 +28,74 @@ export default function Home({ user }) {
   const toggle = (id, panel) => setOpen((cur) => (cur?.id === id && cur.panel === panel ? null : { id, panel }));
 
   return (
-    <div className="dash-container">
-      <header className="about-header">
-        <a href="/" className="about-brand">
-          <img src="/logo.png" alt="" />
-          Second Order
-        </a>
-        <div className="dash-user">
-          <span>{user.name}</span>
-          <button className="sign-out-button" onClick={signOut}>Sign out</button>
-        </div>
-      </header>
+    <DashLayout user={user}>
+      <div className="dash-title">
+        <h1>{user.role === 'admin' ? 'All studies' : 'Your studies'}</h1>
+        {studies && <span className="dash-count">{studies.length}</span>}
+      </div>
 
-      <main className="dash-main">
-        <div className="dash-title">
-          <h1>Your studies</h1>
-          {studies && <span className="dash-count">{studies.length}</span>}
-        </div>
-
-        <div className="dash-toolbar">
-          <input
-            type="search"
-            className="dash-search"
-            placeholder="Search by title, id, description or owner"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search studies"
-          />
-          <div className="dash-scope" role="group" aria-label="Show">
-            {[['all', 'All'], ['mine', 'Mine'], ['shared', 'Shared with me']].map(([value, label]) => (
-              <button key={value} className={scope === value ? 'active' : ''} onClick={() => setScope(value)}>{label}</button>
-            ))}
-          </div>
-        </div>
-
-        {error && <p className="error-message">{error}</p>}
-        {!studies && !error && <p className="dash-empty">Loading studies</p>}
-        {studies && !studies.length && (
-          <p className="dash-empty">No studies yet. Ask Claude or ChatGPT to create one (see Connect an assistant below).</p>
-        )}
-        {studies?.length > 0 && !shown.length && <p className="dash-empty">No studies match.</p>}
-
-        <ul className="dash-list">
-          {shown.map((s) => (
-            <li key={s.id} className="dash-study">
-              <div className="dash-study-head">
-                <div className="dash-study-info">
-                  <h2>{s.title}</h2>
-                  <p className="dash-meta">
-                    <code>{s.id}</code>
-                    <span className={`dash-role role-${s.your_role}`}>{s.your_role}</span>
-                    {s.your_role !== 'owner' && <span>by {s.owner}</span>}
-                    {s.esm && <span className="dash-tag">ESM</span>}
-                    {s.follow_up_of && <span>follow-up of <code>{s.follow_up_of}</code></span>}
-                  </p>
-                  {s.description && <p className="dash-desc">{s.description}</p>}
-                  <p className="dash-stats">
-                    <span><strong>{s.participants}</strong> participants</span>
-                    <span><strong>{s.completed}</strong> completed</span>
-                    <span><strong>{s.open_links}</strong> open link{s.open_links === 1 ? '' : 's'}</span>
-                    {s.latest_version && <span>revision {s.latest_version}</span>}
-                    <span>{s.updated ? `updated ${when(s.updated)}` : `created ${when(s.created_at)}`}</span>
-                    {s.last_participant && <span>last participant {when(s.last_participant)}</span>}
-                  </p>
-                </div>
-                <div className="dash-actions">
-                  {s.dashboard_url
-                    ? <a className="dash-button primary" href={s.dashboard_url} target="_blank" rel="noopener noreferrer">Dashboard</a>
-                    : <span className="dash-button disabled" title="No experiment yet">Dashboard</span>}
-                  <button className={`dash-button ${open?.id === s.id && open.panel === 'download' ? 'active' : ''}`} onClick={() => toggle(s.id, 'download')}>Download data</button>
-                  <button className={`dash-button ${open?.id === s.id && open.panel === 'share' ? 'active' : ''}`} onClick={() => toggle(s.id, 'share')}>Sharing</button>
-                </div>
-              </div>
-              {open?.id === s.id && open.panel === 'download' && <DownloadPanel study={s} />}
-              {open?.id === s.id && open.panel === 'share' && <SharePanel study={s} you={user} />}
-            </li>
+      <div className="dash-toolbar">
+        <input
+          type="search"
+          className="dash-search"
+          placeholder="Search by title, id, description or owner"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Search studies"
+        />
+        <div className="dash-scope" role="group" aria-label="Show">
+          {[['all', 'All'], ['mine', 'Mine'], ['shared', 'Shared with me']].map(([value, label]) => (
+            <button key={value} className={scope === value ? 'active' : ''} onClick={() => setScope(value)}>{label}</button>
           ))}
-        </ul>
+        </div>
+      </div>
 
-        <ConnectSection defaultOpen={studies?.length === 0} />
-      </main>
+      {error && <p className="error-message">{error}</p>}
+      {!studies && !error && <p className="dash-empty">Loading studies</p>}
+      {studies && !studies.length && (
+        <p className="dash-empty">No studies yet. Ask Claude or ChatGPT to create one (see Connect an assistant below).</p>
+      )}
+      {studies?.length > 0 && !shown.length && <p className="dash-empty">No studies match.</p>}
 
-      <footer className="about-footer">
-        <a href="/about">About</a> · &copy; {new Date().getFullYear()} Kit Double. All Rights Reserved.
-      </footer>
-    </div>
+      <ul className="dash-list">
+        {shown.map((s) => (
+          <li key={s.id} className="dash-study">
+            <div className="dash-study-head">
+              <div className="dash-study-info">
+                <h2>{s.title}</h2>
+                <p className="dash-meta">
+                  <code>{s.id}</code>
+                  <span className={`dash-role role-${s.your_role}`}>{s.your_role}</span>
+                  {s.your_role !== 'owner' && <span>by {s.owner}</span>}
+                  {s.esm && <span className="dash-tag">ESM</span>}
+                  {s.follow_up_of && <span>follow-up of <code>{s.follow_up_of}</code></span>}
+                </p>
+                {s.description && <p className="dash-desc">{s.description}</p>}
+                <p className="dash-stats">
+                  <span><strong>{s.participants}</strong> participants</span>
+                  <span><strong>{s.completed}</strong> completed</span>
+                  <span><strong>{s.open_links}</strong> open link{s.open_links === 1 ? '' : 's'}</span>
+                  {s.latest_version && <span>revision {s.latest_version}</span>}
+                  <span>{s.updated ? `updated ${when(s.updated)}` : `created ${when(s.created_at)}`}</span>
+                  {s.last_participant && <span>last participant {when(s.last_participant)}</span>}
+                </p>
+              </div>
+              <div className="dash-actions">
+                {s.dashboard_url
+                  ? <a className="dash-button primary" href={s.dashboard_url} target="_blank" rel="noopener noreferrer">Dashboard</a>
+                  : <span className="dash-button disabled" title="No experiment yet">Dashboard</span>}
+                <button className={`dash-button ${open?.id === s.id && open.panel === 'download' ? 'active' : ''}`} onClick={() => toggle(s.id, 'download')}>Download data</button>
+                <button className={`dash-button ${open?.id === s.id && open.panel === 'share' ? 'active' : ''}`} onClick={() => toggle(s.id, 'share')}>Sharing</button>
+              </div>
+            </div>
+            {open?.id === s.id && open.panel === 'download' && <DownloadPanel study={s} />}
+            {open?.id === s.id && open.panel === 'share' && <SharePanel study={s} you={user} />}
+          </li>
+        ))}
+      </ul>
+
+      <ConnectSection defaultOpen={studies?.length === 0} />
+    </DashLayout>
   );
 }
 

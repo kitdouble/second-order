@@ -7,6 +7,7 @@ import Home from './Home.jsx';
 import Upload from './Upload.jsx';
 import Import from './Import.jsx';
 import About from './About.jsx';
+import Admin from './Admin.jsx';
 
 export default function App() {
   const path = window.location.pathname;
@@ -32,6 +33,7 @@ export default function App() {
     if (path !== '/login') window.history.replaceState(null, '', '/login');
     return <Login />;
   }
+  if (path === '/admin' && user.role === 'admin') return <Admin user={user} />;
   if (path !== '/') window.history.replaceState(null, '', '/');
   return <Home user={user} />;
 }

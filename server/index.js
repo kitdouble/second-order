@@ -11,6 +11,7 @@ import { runApp } from './run.js';
 import { uploads } from './uploads.js';
 import { downloads } from './data.js';
 import { web } from './web.js';
+import { admin } from './admin.js';
 import { imports } from './exports.js';
 import { esmEdit, esmSite } from './esm-edit.js';
 import { collectGarbage } from './live.js';
@@ -43,6 +44,7 @@ main.use(oauthRouter); // /.well-known/*, /authorize, /token, /register, /revoke
 main.use('/mcp', mcp);
 main.use('/api/downloads', downloads);
 main.use('/api/studies', web); // the signed-in researcher's dashboard
+main.use('/api/admin', admin); // the admin dashboard
 main.get('/api/me', requireUser, (req, res) => res.json({ user: req.user }));
 main.get('/api/health', (_req, res) => res.json({ ok: true }));
 main.use(esmEdit); // /esm-edit/<secret> and its API: no account, the secret is the credential
